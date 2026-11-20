@@ -1,0 +1,4 @@
+#!/bin/sh
+AIWS_ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+export AIWS_WORKSPACE="$AIWS_ROOT"
+exec "$AIWS_ROOT/engine/.venv/bin/aiws-mcp"
