@@ -81,8 +81,15 @@ class Timeline:
 
     def _read(self, project_id):
         relative, path = self._path(project_id)
-        text = path.read_text() if path.exists() else ''
-        sha = digest(path) if path.exists() else None
+        # An append can atomically replace the file while another job reads it.
+        # Parse and fingerprint the same snapshot, not two reads of the path.
+        try:
+            content = path.read_bytes()
+        except FileNotFoundError:
+            text, sha = '', None
+        else:
+            text = content.decode().replace('\r\n', '\n').replace('\r', '\n')
+            sha = hashlib.sha256(content).hexdigest()
         records, pending = [], []
         for match in BLOCK.finditer(text):
             line = text.count('\n', 0, match.start()) + 1

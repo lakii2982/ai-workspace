@@ -27,15 +27,16 @@ class GitStore:
         return r
 
     def initialize(self):
-        if (self.root / '.git').exists() and not self.enabled:
-            raise Error('GIT_LAYOUT_UNSUPPORTED', 'Use a project-local Git directory')
-        if not self.enabled:
-            self._git('init', '--quiet')
-            # Runtime environments are not business versions. Preserve existing rules.
-            ignore = self.root / '.git' / 'info' / 'exclude'
-            with ignore.open('a') as f:
-                f.write('\n**/.venv/\n**/__pycache__/\n**/.pytest_cache/\n**/.DS_Store\n**/dist/\n**/build/\n')
-        return self.inspect()
+        with self.w.lock('git:' + self.project['project_id']):
+            if (self.root / '.git').exists() and not self.enabled:
+                raise Error('GIT_LAYOUT_UNSUPPORTED', 'Use a project-local Git directory')
+            if not self.enabled:
+                self._git('init', '--quiet')
+                # Runtime environments are not business versions. Preserve existing rules.
+                ignore = self.root / '.git' / 'info' / 'exclude'
+                with ignore.open('a') as f:
+                    f.write('\n**/.venv/\n**/__pycache__/\n**/.pytest_cache/\n**/.DS_Store\n**/dist/\n**/build/\n')
+            return self.inspect()
 
     def inspect(self):
         if not self.enabled:
@@ -89,12 +90,12 @@ class GitStore:
                     result[os.fsdecode(path)] = oid.decode()
         return result
 
-    def observe(self, base=None):
-        if not self.enabled:
-            raise Error('GIT_NOT_INITIALIZED', 'Initialize the project Git repository first')
-        if base:
-            base = self._resolve(base)
+    def observe(self, base=None, *, include_status=False):
         with self.w.lock('git:' + self.project['project_id']):
+            if not self.enabled:
+                raise Error('GIT_NOT_INITIALIZED', 'Initialize the project Git repository first')
+            if base:
+                base = self._resolve(base)
             info = self.inspect()
             nested = self._nested_repositories()
             with tempfile.TemporaryDirectory(dir=self.root / '.git', prefix='aiws-index-') as folder:
@@ -148,9 +149,12 @@ class GitStore:
                     changes.append(dict(path=path, old_path=old_path, type=code[0]))
             else:
                 changes = [dict(path=p, old_path=None, type='A') for p in files]
-            return dict(commit=commit, ref='refs/aiws/observations/' + commit,
-                        files=files, changes=changes, ignored=info['ignored'], head=info['head'],
-                        unsupported_repositories=nested)
+            result = dict(commit=commit, ref='refs/aiws/observations/' + commit,
+                          files=files, changes=changes, ignored=info['ignored'], head=info['head'],
+                          unsupported_repositories=nested)
+            if include_status:
+                result['git_status'] = info
+            return result
 
     def snapshot(self, checkpoint_id=None):
         result = self.observe()
@@ -164,8 +168,11 @@ class GitStore:
         self._git('update-ref', ref, result['commit'])
         return {**result, 'ref': ref}
 
+    def file_oids(self, commit):
+        return self._files(self._resolve(commit))
+
     def file_oid(self, commit, path):
-        return self._files(self._resolve(commit)).get(path)
+        return self.file_oids(commit).get(path)
 
     def read_version(self, commit, path):
         commit = self._resolve(commit)

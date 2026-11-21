@@ -4,7 +4,7 @@
 
 - initialize_project_git(project_id)：显式启用项目根独立 Git；不变更框架根仓库。
 - prepare_work_context(project_id?,jid?,session_id?,intent='',detail='brief')：定位优先 jid、绑定session、明确项目；返回 identity/project_brief/task_context/git_status/observation/git_changes/memory/memory_references/reading_queue/coverage/expand。观察可创建Git对象但不推进任务revision；无Git项目仍可读背景。
-- resume_job/resume_session：保留旧字段，已纳管单项目任务自动附带 work_context；其他情况提供 context_entry。create_job/get_project 也给入口。
+- resume_job/resume_session：保留任务结果字段，并附带快速接续的 work_context，只读取目标任务，不扫描任务列表或刷新检索索引。明确的单项目可返回主稿位置、Git 观察和已读资料的变化；无法确定唯一主稿或项目时不猜。需要完整项目上下文时，调用显式入口 prepare_work_context 或 get_project_overview。
 - get_project_overview(project_id,detail='brief')：完整分页聚合后裁剪，coverage提供省略数和任务revision。
 - read_project_file(project_id,path,commit=None)：项目相对路径，读取当前观察或指定Git版本；返回文本/locator/chunks及readability，不要求artifact登记。
 - compare_project_file(project_id,path,before,after=None)：提取前后文本与diff；受限格式不会伪造差异。
@@ -63,6 +63,6 @@ DELIVERABLE_REQUIRED：任务转completed时，若 工作/JOB/工作稿/ 仍有�
 
 飞书“执行数据”“数据指纹”为系统维护列，普通视图隐藏；不包含业务文件正文。附件/来源清单存本地内容寻址manifest，远端只存其hash。项目表与任务表的“状态”均为single select。所属项目ID为单向link，所属项目名称为lookup只读列。英文状态映射在remote_store.py中定义。
 
-单协调主机全入口串行锁保护读-检查-写，远端字段比对检测入口外修改；并不声称飞书API提供原子CAS或防御有意绕过。远端成功但本地中断后，manifest和pending回执用于恢复。恢复副本默认offline staging，不自动写远端。
+单协调主机按任务或项目锁定冲突的读-检查-写；工作空间级维护仍独占。远端字段比对检测入口外修改，仍不声称飞书 API 提供原子 CAS，也不支持不同协调主机并行写入。远端成功但本地中断后，manifest和pending回执用于恢复。恢复副本默认offline staging，不自动写远端。
 
 日期时间字段契约：任务表「更新时间」「认领有效期」为 datetime，style.format=`yyyy-MM-dd HH:mm`。CLI CellValue 为带时区 RFC3339 或 null；更新时间从 canonical updated_at 转换，租约 expires 从 Unix 秒转换；UTC 毫秒归一化后比较，时区偏移等价不算漂移，真实时刻变化仍拒绝。执行数据保留原始精度与数据指纹；空租约不写 epoch。项目表暂无时间值字段。
