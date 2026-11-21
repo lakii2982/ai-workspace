@@ -4,7 +4,7 @@ import sqlite3
 from pathlib import Path
 import tempfile
 import difflib
-from .core import Error, digest, now, load
+from .core import Error, now, load
 
 def extract(path):
     ext=path.suffix.lower()
@@ -47,10 +47,18 @@ class Retrieval:
     def connect(self):
         db=sqlite3.connect(self.w.path('.workspace/index/sources.sqlite'),timeout=30)
         db.row_factory=sqlite3.Row
-        db.execute('PRAGMA journal_mode=WAL')
-        db.execute('CREATE TABLE IF NOT EXISTS sources (source_id TEXT PRIMARY KEY, source_path TEXT, scope_type TEXT, project_id TEXT, title TEXT, locator TEXT, snippet TEXT, sha256 TEXT, indexed_at TEXT, source_status TEXT)')
-        db.execute("CREATE VIRTUAL TABLE IF NOT EXISTS terms USING fts5(source_id UNINDEXED, snippet, tokenize='trigram')")
         try:
+            if db.execute('PRAGMA journal_mode').fetchone()[0] != 'wal':
+                db.execute('PRAGMA journal_mode=WAL')
+            db.execute('CREATE TABLE IF NOT EXISTS sources (source_id TEXT PRIMARY KEY, source_path TEXT, scope_type TEXT, project_id TEXT, title TEXT, locator TEXT, snippet TEXT, sha256 TEXT, indexed_at TEXT, source_status TEXT)')
+            db.execute("CREATE VIRTUAL TABLE IF NOT EXISTS terms USING fts5(source_id UNINDEXED, snippet, tokenize='trigram')")
+            db.execute('CREATE INDEX IF NOT EXISTS sources_by_path ON sources(source_path)')
+            db.execute("""
+                CREATE TABLE IF NOT EXISTS source_files (
+                    root TEXT NOT NULL, path TEXT NOT NULL, version TEXT,
+                    status TEXT, error TEXT, PRIMARY KEY(root,path)
+                )
+            """)
             yield db
             db.commit()
         except BaseException:
@@ -59,74 +67,110 @@ class Retrieval:
         finally:
             db.close()
     def update(self, scope=None):
-        """Refresh only selected roots; Git projects reuse parsed rows by blob identity."""
+        """Refresh selected roots and only replace rows for changed files."""
         if scope is not None:self.w.scope(scope)
-        projects = [p for p in self.w.projects() if scope is None or p['project_id'] in scope['project_ids']]
+        projects = self.w.projects() if scope is None else [
+            self.w.project_for(pid) for pid in dict.fromkeys(scope['project_ids'])
+        ]
         roots = []
         if scope is None or scope['include_company']:roots.append(('公司知识', None))
         if scope is None or scope['include_professional']:roots.append(('专业知识', None))
         roots += [(p['path'],p['project_id']) for p in projects]
         changed=0;failures=[]
+        for root,pid in roots:
+            # A slow file parser may delay another search in this root, but
+            # does not exclude work in unrelated roots or hold a SQLite writer.
+            with self.w.lock('index-root:'+root):
+                n,errors=self._update_root(root,pid)
+            changed+=n
+            failures.extend(errors)
+        with self.connect() as db:
+            count=db.execute('SELECT count(*) FROM sources').fetchone()[0]
+        return {'sources':count,'changed_files':changed,'failures':failures}
+
+    def _update_root(self, root, pid):
+        git=None;observation=None
+        if pid:
+            from .git_store import GitStore
+            git=GitStore(self.w,pid)
+            if git.enabled:observation=git.observe()
+        if observation is not None:
+            candidates=((root+'/'+path,'git:'+oid,path) for path,oid in observation['files'].items())
+        else:
+            candidates=((p.relative_to(self.w.root).as_posix(),None,None)
+                        for p in sorted(self.w.path(root).rglob('*')) if p.is_file())
+        with self.connect() as db:
+            cached={r['path']:dict(r) for r in db.execute('SELECT * FROM source_files WHERE root=?',(root,))}
+            # Also see paths from pre-incremental indexes. A first refresh
+            # rebuilds those paths individually and prunes deleted ones.
+            old={r[0] for r in db.execute(
+                'SELECT DISTINCT source_path FROM sources WHERE source_path>=? AND source_path<?',
+                (root+'/',root+'0'))}
+
         approvals={}
         for event in self.w.path('.workspace/history/events').glob('*.json'):
             record=load(event)
-            if record.get('phase')=='committed' and record.get('confirmed'):
+            if (record.get('phase')=='committed' and record.get('confirmed')
+                    and record['path'].startswith(root+'/')):
                 approvals.setdefault(record['path'],set()).add(record['new_hash'])
-        with self.w.lock('index'):
-            with self.connect() as db:
-                db.execute('CREATE TABLE IF NOT EXISTS git_files (project_id TEXT, path TEXT, oid TEXT, error TEXT, PRIMARY KEY(project_id,path))')
-                for root,pid in roots:
-                    git=None;observation=None
-                    if pid:
-                        from .git_store import GitStore
-                        git=GitStore(self.w,pid)
-                        if git.enabled:observation=git.observe()
-                    old={}
-                    for row in db.execute('SELECT * FROM sources WHERE substr(source_path,1,?)=?', (len(root)+1,root+'/',)):
-                        old.setdefault(row['source_path'],[]).append(dict(row))
-                    if observation is not None:
-                        candidates=[(root+'/'+path,'git:'+oid,path) for path,oid in observation['files'].items()]
-                    else:
-                        candidates=[(p.relative_to(self.w.root).as_posix(),None,None) for p in sorted(self.w.path(root).rglob('*')) if p.is_file()]
-                    rows=[];gitrows=[]
-                    previous_git={r['path']:dict(r) for r in db.execute('SELECT * FROM git_files WHERE project_id=?',(pid,))} if pid else {}
-                    for rel,version,local in candidates:
-                        if any(x.startswith('.') or x.startswith('~$') for x in Path(rel).parts) or '工作' in Path(rel).parts:continue
-                        try:
-                            path=self.w.path(rel);kind,project_id,status=self.w.classify(rel)
-                            version=version or digest(path)
-                            previous=old.get(rel,[])
-                            if rel in approvals:
-                                # Existing publication approval is SHA-based; Git still decides changes.
-                                approved_bytes=git.read_version(observation['commit'],local) if observation is not None else path.read_bytes()
-                                if hashlib.sha256(approved_bytes).hexdigest() in approvals[rel]:status='approved'
-                            saved=previous_git.get(local)
-                            if saved and 'git:'+saved['oid']==version and saved['error']:
-                                failures.append({'path':rel,'code':saved['error']});gitrows.append((pid,local,version[4:],saved['error']));continue
-                            if previous and previous[0]['sha256']==version:
-                                chunks=[(x['locator'],x['snippet']) for x in previous]
-                            else:
-                                changed+=1
-                                if observation is not None:chunks=self._extract_bytes(git.read_version(observation['commit'],local),path.suffix)
-                                else:chunks=extract(path)
-                            for loc,body in chunks:
-                                sid=hashlib.sha256(f'{kind}:{project_id}:{rel}:{loc}'.encode()).hexdigest()[:32]
-                                rows.append((sid,rel,kind,project_id,path.name,loc,body,version,now(),status))
-                            if local is not None:gitrows.append((pid,local,version[4:],None))
-                        except Exception as e:
-                            code=e.code if isinstance(e,Error) else 'PARSE_ERROR'
-                            failures.append({'path':rel,'code':code})
-                            if local is not None:gitrows.append((pid,local,version[4:],code))
-                    ids=[r[0] for r in db.execute('SELECT source_id FROM sources WHERE substr(source_path,1,?)=?', (len(root)+1,root+'/',))]
-                    db.executemany('DELETE FROM terms WHERE source_id=?',[(x,) for x in ids])
-                    db.execute('DELETE FROM sources WHERE substr(source_path,1,?)=?', (len(root)+1,root+'/',))
-                    db.executemany('INSERT INTO sources VALUES (?,?,?,?,?,?,?,?,?,?)',rows)
-                    db.executemany('INSERT INTO terms VALUES (?,?)',[(r[0],r[6]) for r in rows])
-                    if pid:
-                        db.execute('DELETE FROM git_files WHERE project_id=?',(pid,))
-                        db.executemany('INSERT INTO git_files VALUES (?,?,?,?)',gitrows)
-                count=db.execute('SELECT count(*) FROM sources').fetchone()[0]
-        return {'sources':count,'changed_files':changed,'failures':failures}
+
+        seen=set(); replacements=[]; status_updates=[]; failures=[]; changed=0
+        for rel,version,local in candidates:
+            if any(x.startswith('.') or x.startswith('~$') for x in Path(rel).parts) or '工作' in Path(rel).parts:continue
+            seen.add(rel)
+            before=cached.get(rel)
+            rows=[];status=None;code=None
+            try:
+                path=self.w.path(rel)
+                kind,project_id,status=self.w.classify(rel)
+                content=None
+                if version is None or rel in approvals:
+                    content=(path.read_bytes() if local is None else
+                             git.read_version(observation['commit'],local))
+                    sha=hashlib.sha256(content).hexdigest()
+                    version=version or sha
+                    if sha in approvals.get(rel,()):status='approved'
+                if before and before['version']==version:
+                    if before['error'] is None:
+                        if before['status']!=status:status_updates.append((status,rel))
+                        continue
+                    if before['error'] in ('PARSE_UNSUPPORTED','PARSE_LIMITED'):
+                        failures.append({'path':rel,'code':before['error']})
+                        continue
+                    # Transient I/O or runtime failures should not hide a
+                    # document forever just because its bytes did not change.
+                changed+=1
+                if content is None:content=git.read_version(observation['commit'],local)
+                for loc,body in self._extract_bytes(content,path.suffix):
+                    sid=hashlib.sha256(f'{kind}:{project_id}:{rel}:{loc}'.encode()).hexdigest()[:32]
+                    rows.append((sid,rel,kind,project_id,path.name,loc,body,version,now(),status))
+            except Exception as e:
+                code=e.code if isinstance(e,Error) else 'PARSE_ERROR'
+                failures.append({'path':rel,'code':code})
+                if before and before['version']==version and before['error']==code:continue
+            replacements.append((rel,version,status,code,rows))
+        removed=(old|cached.keys())-seen
+        if not (replacements or removed or status_updates):return changed,failures
+        with self.connect() as db:
+            # No file access or parsing inside this write transaction. A path
+            # and its FTS entries are replaced together even if a write fails.
+            for rel in sorted(removed):self._delete_path(db,root,rel,rel in old)
+            for rel,version,status,code,rows in replacements:
+                self._delete_path(db,root,rel,rel in old)
+                db.executemany('INSERT INTO sources VALUES (?,?,?,?,?,?,?,?,?,?)',rows)
+                db.executemany('INSERT INTO terms VALUES (?,?)',[(r[0],r[6]) for r in rows])
+                db.execute('INSERT INTO source_files VALUES (?,?,?,?,?)',(root,rel,version,status,code))
+            for status,rel in status_updates:
+                db.execute('UPDATE sources SET source_status=? WHERE source_path=?',(status,rel))
+                db.execute('UPDATE source_files SET status=? WHERE root=? AND path=?',(status,root,rel))
+        return changed,failures
+
+    @staticmethod
+    def _delete_path(db,root,rel,has_sources):
+        if has_sources:
+            db.execute('DELETE FROM terms WHERE source_id IN (SELECT source_id FROM sources WHERE source_path=?)',(rel,))
+            db.execute('DELETE FROM sources WHERE source_path=?',(rel,))
+        db.execute('DELETE FROM source_files WHERE root=? AND path=?',(root,rel))
 
     def _extract_bytes(self, content, suffix):
         folder=self.w.path('.workspace/index/parse-temp');folder.mkdir(exist_ok=True)
@@ -197,8 +241,13 @@ class Retrieval:
             if observation['files'].get(local)!=value['sha256'][4:]:raise Error('STALE_INDEX','Original changed; search again')
             chunks=dict(self._extract_bytes(git.read_version(observation['commit'],local),path.suffix))
         else:
-            if not path.exists() or digest(path)!=value['sha256']: raise Error('STALE_INDEX','Original changed; update index and search again')
-            chunks=dict(extract(path))
+            try:
+                content=path.read_bytes()
+            except FileNotFoundError:
+                raise Error('STALE_INDEX','Original changed; update index and search again') from None
+            if hashlib.sha256(content).hexdigest()!=value['sha256']:
+                raise Error('STALE_INDEX','Original changed; update index and search again')
+            chunks=dict(self._extract_bytes(content,path.suffix))
         if value['locator'] not in chunks: raise Error('STALE_INDEX','Locator no longer exists')
         value['snippet']=chunks[value['locator']]
         return value

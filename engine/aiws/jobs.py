@@ -92,7 +92,10 @@ class Jobs:
             if request_file:put_json(request_file,dict(schema_version=1,payload=payload,jid=jid))
             j=dict(schema_version=1,job_id=jid,title=title,goal=goal,acceptance=acceptance or [],status='new',scope=scope,revision=1,last_agent=agent,completed=[],next_steps=[],open_issues=[],decisions=[],artifacts=[],sources=[],updated_at=now())
             j['directory_name']=jid+'_'+''.join(c if c not in '/\\\n\r' else '_' for c in title)[:60]
-            return self.persist(j)
+            # A remote row can become visible before persist() finishes the
+            # local mirror. Guard the allocation's new task through that point.
+            with self.w.lock('service-job:'+jid):
+                return self.persist(j)
     def unpromoted(self,j):
         """工作稿有文件但成果目录为空的分组；完成前必须移交成果或降级为过程材料。"""
         pending=[]
@@ -139,18 +142,26 @@ class Jobs:
             j['revision']+=1;j['updated_at']=now()
             return self.persist(j)
     def resume(self,jid,detail="brief"):
-        if detail not in ("brief","full"):raise Error("INVALID_ARGUMENT","detail must be brief or full")
-        if detail=="brief":return self.brief(jid)
+        return self.resume_record(self.get(jid), detail)
 
-        with self.w.lock('job:'+jid):
-            j=self.get(jid);self.handoff(j)
-            verified=[]
-            for a in j['artifacts']:
-                p=self.w.path(a['path']);verified.append({**a,'integrity':'ok' if p.exists() and digest(p)==a['hash'] else 'changed_or_missing'})
-            return {**j,'artifact_integrity':verified}
+    def resume_record(self,j,detail="brief"):
+        if detail not in ("brief","full"):raise Error("INVALID_ARGUMENT","detail must be brief or full")
+        if detail=="brief":return self.brief_record(j)
+        verified=[]
+        for a in j['artifacts']:
+            p=self.w.path(a['path'])
+            try:
+                matches=p.is_file() and digest(p)==a['hash']
+            except FileNotFoundError:
+                matches=False
+            verified.append({**a,'integrity':'ok' if matches else 'changed_or_missing'})
+        return {**j,'artifact_integrity':verified}
 
     def brief(self,jid):
-        j=self.get(jid)
+        return self.brief_record(self.get(jid))
+
+    def brief_record(self,j):
+        jid=j['job_id']
         fields=['job_id','title','goal','status','revision','scope','updated_at','last_agent','acceptance','next_steps','open_issues','decisions']
         result={k:j[k] for k in fields}
         omitted={}
@@ -205,7 +216,7 @@ class Artifacts:
             if sub[0]=='工作' and (len(sub)<3 or sub[1] not in (jid,j.get('directory_name',jid))):raise Error('INVALID_SCOPE','Draft must belong to this job')
         formal=kind!='project' or '工作' not in parts
         if formal and not confirm:raise Error('CONFIRMATION_REQUIRED','Explicit confirmation required to publish formal knowledge')
-        target=self.w.path(relative)
+        relative=self.w.path(relative).relative_to(self.w.root).as_posix()
         if not isinstance(content,bytes):raise Error('INVALID_ARGUMENT','Artifact content must be bytes')
         with self.w.lock('file:'+relative):
             target=self.w.path(relative)
@@ -227,6 +238,7 @@ class Artifacts:
             artifact={'path':relative,'hash':digest(target),'purpose':purpose,'status':'approved' if formal else 'draft'}
             with self.w.lock('job:'+jid):
                 latest=self.jobs.get(jid)
-                latest['artifacts']=[a for a in latest['artifacts'] if a['path']!=relative]+[artifact]
+                latest['artifacts']=[a for a in latest['artifacts']
+                                     if Path(a['path']).as_posix()!=relative]+[artifact]
                 latest['revision']+=1;latest['updated_at']=now();self.jobs.persist(latest)
             return artifact

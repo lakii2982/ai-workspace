@@ -1,7 +1,7 @@
 """Project-local context assembled from authoritative jobs, memory and Git."""
-from pathlib import Path
 from collections import Counter
-from .core import Error, load, now
+import re
+from .core import Error, now
 from .jobs import Jobs
 
 
@@ -74,55 +74,108 @@ class Context:
                     expand=dict(operation='get_project_overview', project_id=project_id, detail='full'))
 
     def prepare(self, project_id=None, jid=None, session_id=None, intent='', detail='brief'):
-        from .git_store import GitStore
-        from .timeline import Timeline
         if detail not in ('brief','full'):
             raise Error('INVALID_ARGUMENT', 'detail must be brief or full')
         if session_id and not jid:
-            import hashlib
-            binding = self.w.path('.workspace/sessions/'+hashlib.sha256(session_id.encode()).hexdigest()+'.json')
-            if binding.exists():
-                jid = load(binding)['jid']
+            from .workflow import Workflow
+            jid = Workflow(self.w).session_job_id(session_id, missing_ok=True)
         j = Jobs(self.w).get(jid) if jid else None
+        return self._prepare(project_id, j, intent, detail, targeted=False)
+
+    def prepare_record(self, j, detail='brief'):
+        """Resume directly from one authoritative job, without a project task rollup."""
+        if detail not in ('brief', 'full'):
+            raise Error('INVALID_ARGUMENT', 'detail must be brief or full')
+        return self._prepare(None, j, '', detail, targeted=True)
+
+    def _prepare(self, project_id, j, intent, detail, *, targeted):
+        from .git_store import GitStore
+        from .timeline import Timeline
+        jid = j['job_id'] if j else None
+        ctx = (j or {}).get('context', {})
+        task_context = None
         if j:
+            task_context = dict(jid=jid, title=j['title'], goal=j['goal'], status=j['status'],
+                                revision=j['revision'], saved_at=j['updated_at'],
+                                context=ctx, completed=j['completed'][-3:] if detail=='brief' else j['completed'],
+                                next_steps=j['next_steps'], open_issues=j['open_issues'],
+                                local_decisions=j['decisions'], artifacts=j['artifacts'])
             ids = j['scope']['project_ids']
             if project_id and project_id not in ids:
                 raise Error('INVALID_SCOPE', 'Project outside task')
             if not project_id:
                 if len(ids) != 1:
                     return dict(identity=dict(jid=jid), project_candidates=ids,
+                                task_context=task_context,
                                 pending_updates=['Specify a project for this task'])
                 project_id = ids[0]
         if not project_id:
             return dict(identity={}, pending_updates=['Locate the project and task first'])
         p = self.w.project_for(project_id)
-        overview = self.overview(project_id, detail)
-        ctx = (j or {}).get('context', {})
+        overview = (
+            dict(project={k: p.get(k) for k in ('project_id','name','goal','status','status_note','path')},
+                 expand=dict(operation='get_project_overview', project_id=project_id, detail='full'))
+            if targeted else self.overview(project_id, detail)
+        )
         git = GitStore(self.w, project_id)
-        status = git.inspect()
-        observation, changes, queue = None, [], []
-        if status.get('enabled'):
-            observation = git.observe(base=ctx.get('checkpoint_commit'))
-            from .retrieval import Retrieval
-            index_report=Retrieval(self.w).update(dict(include_company=False,include_professional=False,
-                                                    project_ids=[project_id],topic_ids=[]))
-            changes = observation['changes']
-            reviewed = {r['path']:r['observation_commit'] for r in ctx.get('reviewed_files', [])}
-            for path, oid in observation['files'].items():
-                # Metadata is available through dedicated context/memory sections.
-                if path.startswith('.') or path in ('PROJECT.md','记忆/TIMELINE.md'):
-                    continue
-                seen = False
-                if path in reviewed:
+        observation, changes, queue, changed_reviewed = None, [], [], []
+        stale = set()
+        index_report = None
+        working = ctx.get('working_files', [])
+        reviewed = {self.relative_file(p, r['path']):r['observation_commit']
+                    for r in ctx.get('reviewed_files', [])}
+        primary = {self.relative_file(p, x['path']) for x in working}
+        linked = primary | reviewed.keys()
+        if j:
+            linked.update(self.relative_file(p, a['path']) for a in j['artifacts'])
+
+        def visible(path):
+            if not targeted or not path or path in linked:
+                return True
+            owner = re.match(r'(?:工作|成果)/(JOB-\d+)(?:_|/|$)', path)
+            return not owner or owner[1] == jid
+
+        if git.enabled:
+            observation = git.observe(base=ctx.get('checkpoint_commit'), include_status=True)
+            status = observation.pop('git_status')
+            if not targeted:
+                from .retrieval import Retrieval
+                index_report=Retrieval(self.w).update(dict(include_company=False,include_professional=False,
+                                                        project_ids=[project_id],topic_ids=[]))
+            changes = [change for change in observation['changes']
+                       if visible(change['path']) or
+                       change.get('old_path') and visible(change['old_path'])]
+            trees = {observation['commit']: observation['files']}
+            for path, commit in reviewed.items():
+                if commit not in trees:
                     try:
-                        seen = git.file_oid(reviewed[path], path) == oid
-                    except Error:
-                        pass
-                if not seen:
+                        trees[commit] = git.file_oids(commit)
+                    except Error as error:
+                        if error.code not in ('INVALID_ARGUMENT', 'GIT_VERSION_MISSING'):
+                            raise
+                        trees[commit] = None
+                previous = trees[commit]
+                if previous is None:
+                    state = 'baseline_unavailable'
+                elif path not in observation['files']:
+                    state = 'missing'
+                elif previous.get(path) != observation['files'][path]:
+                    state = 'changed'
+                else:
+                    continue
+                changed_reviewed.append(dict(path=path, state=state, reviewed_commit=commit))
+            stale = {r['path'] for r in changed_reviewed}
+            for path in observation['files']:
+                # Metadata is available through dedicated context/memory sections.
+                if not visible(path) or path.startswith('.') or path in ('PROJECT.md','记忆/TIMELINE.md'):
+                    continue
+                if path not in reviewed or path in stale:
                     queue.append(dict(path=path, observation_commit=observation['commit'],
                                       reason='new_or_changed_since_read',
                                       read=dict(operation='read_project_file', project_id=project_id,
                                                 path=path, commit=observation['commit'])))
+        else:
+            status = git.inspect()
         # Constraints are never lost behind pagination or relevance ranking.
         memory = self.memories(project_id)
         references=[]
@@ -131,7 +184,6 @@ class Context:
                 references.append(Timeline(self.w).read_memory(project_id,event_id))
             except Error as error:
                 references.append(dict(event_id=event_id,state='unavailable',reason=error.message))
-        import re
         terms=re.findall(r'[A-Za-z0-9_]+|[\u4e00-\u9fff]+',intent)
         keywords=[]
         for term in terms:
@@ -140,8 +192,9 @@ class Context:
             else:
                 keywords.append(term)
         related = Timeline(self.w).list_memory(project_id,query=' '.join(keywords),limit=20) if keywords else None
-        working = ctx.get('working_files', [])
-        primary = {self.relative_file(p, x['path']) for x in working}
+        draft = self.primary_draft(p, j, observation) if j else None
+        if draft:
+            primary.add(draft['path'])
         pending_updates=[] if status.get('enabled') else ['Project Git is not initialized']
         if observation:
             for path in primary:
@@ -149,19 +202,14 @@ class Context:
                     replacement=next((c['path'] for c in changes if c.get('old_path')==path),None)
                     pending_updates.append(dict(path=path,state='moved' if replacement else 'missing',
                                                 candidate=replacement))
-        queue.sort(key=lambda x: (x['path'] not in primary, x['path']))
+        queue.sort(key=lambda x: (x['path'] not in primary, x['path'] not in stale, x['path']))
         omitted = max(0, len(queue)-20) if detail=='brief' else 0
-        task_context = None
-        if j:
-            task_context = dict(jid=jid, title=j['title'], goal=j['goal'], status=j['status'],
-                                revision=j['revision'], saved_at=j['updated_at'],
-                                context=ctx, completed=j['completed'][-3:] if detail=='brief' else j['completed'],
-                                next_steps=j['next_steps'], open_issues=j['open_issues'],
-                                local_decisions=j['decisions'], artifacts=j['artifacts'])
         public_observation=({k:v for k,v in observation.items() if k not in ('files','changes','ignored')}
                             if observation else None)
         coverage=dict(unread_files=len(queue),omitted_reading=omitted,
                       total_changes=len(changes),omitted_changes=0)
+        status={**status,'status':[r for r in status['status'] if visible(r['path'])],
+                'ignored':[path for path in status['ignored'] if visible(path)]}
         if detail=='brief':
             changes.sort(key=lambda x:(x['path'] not in primary,x['path']))
             coverage['omitted_changes']=max(0,len(changes)-20)
@@ -174,7 +222,8 @@ class Context:
                                     'total_unsupported_repositories':len(nested)}
         return dict(identity=dict(project_id=project_id, jid=jid), project_brief=overview,
                     task_context=task_context, git_status=status, observation=public_observation,
-                    index=index_report if status.get('enabled') else None,
+                    primary_draft=draft, changed_reviewed_files=changed_reviewed,
+                    index=index_report,
                     git_changes=changes, memory=self.memory_view(memory,detail), memory_references=references,
                     related_memory=self.memory_view(related,detail) if related else None,
                     reading_queue=queue[:20] if detail=='brief' else queue,
@@ -182,6 +231,22 @@ class Context:
                     pending_updates=pending_updates,
                     expand=dict(operation='prepare_work_context', project_id=project_id, jid=jid,
                                 intent=intent, detail='full'))
+
+    def primary_draft(self, project, job, observation):
+        marked = [self.relative_file(project, r['path']) for r in job.get('context', {}).get('working_files', [])
+                  if r.get('role') in ('主稿', '主文档', 'main', 'primary', 'main_draft', 'primary_draft')]
+        if not marked:
+            folder = '工作/' + job.get('directory_name', job['job_id']) + '/工作稿/'
+            marked = [self.relative_file(project, a['path']) for a in job['artifacts']
+                      if a['path'].startswith(project['path']+'/'+folder)]
+        paths = set(marked)
+        if len(paths) != 1:
+            return None
+        path = paths.pop()
+        if observation:
+            return dict(path=path, state='available' if path in observation['files'] else 'missing',
+                        observation_commit=observation['commit'])
+        return dict(path=path, state='not_checked')
 
     @staticmethod
     def relative_file(project, path):

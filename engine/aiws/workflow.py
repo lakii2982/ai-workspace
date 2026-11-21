@@ -61,8 +61,12 @@ class Workflow:
         put_json(path,dict(schema_version=1,session_id=session_id,jid=jid,project_ids=job['scope']['project_ids']))
         return self.jobs.brief(jid)
     def session(self,session_id):
+        return self.jobs.brief(self.session_job_id(session_id))
+    def session_job_id(self,session_id,*,missing_ok=False):
         path=self.w.path('.workspace/sessions/'+hashlib.sha256(session_id.encode()).hexdigest()+'.json')
-        return self.jobs.brief(load(path)['jid'])
+        if missing_ok and not path.exists():
+            return None
+        return load(path)['jid']
 
 def check_lease(j,token,require=False):
     lease=j.get('lease',{})

@@ -5,74 +5,118 @@ from .retrieval import Retrieval
 from .jobs import Jobs, Artifacts
 from .maintenance import Maintenance
 from .timeline import Timeline
+from contextlib import nullcontext
+
+
+# These operations change workspace-wide allocation/authority, or reconcile
+# pending rows across all projects. Exclude ordinary operations until complete.
+_EXCLUSIVE_OPERATIONS = {
+    'create_project', 'migrate_feishu', 'rollback_feishu', 'reconcile_remote',
+    'feishu_stage_job',
+}
+# Serialize a same-task service transaction across its file check, Git snapshot
+# and checkpoint. Resume and contextual reads acquire this same guard after
+# resolving a bound session. Low-level file and revision locks remain in place.
+_JOB_WRITES = {
+    'checkpoint_job', 'claim_job', 'renew_claim', 'release_job', 'mark_context_read',
+    'save_work_checkpoint', 'save_artifact', 'write_work_file', 'publish_file',
+}
+_PROJECT_OPERATIONS = {'get_project', 'update_project', 'append_timeline', 'initialize_project_git'}
 
 class Service:
     def __init__(self,root):self.w=Workspace(root)
     def call(self,operation,args):
-        if operation=='init':return self.w.init()
-        if not self.w.path('.workspace/config.json').exists():raise Error('NOT_FOUND','Run init first')
-        if operation=='backup':return Maintenance(self.w).backup()
-        if operation=='restore':return Maintenance(self.w).restore(**args)
-        gate=self.w.path('.workspace/gate.lock')
+        # Metadata caches are scoped to a request, not a long-lived service.
+        w=Workspace(self.w.root)
+        if operation=='init':return w.init()
+        if not w.path('.workspace/config.json').exists():raise Error('NOT_FOUND','Run init first')
+        if operation=='backup':return Maintenance(w).backup()
+        if operation=='restore':return Maintenance(w).restore(**args)
+        gate=w.path('.workspace/gate.lock')
         with gate.open('a+') as lock:
-            fcntl.flock(lock,fcntl.LOCK_SH)
+            fcntl.flock(lock,fcntl.LOCK_EX if operation in _EXCLUSIVE_OPERATIONS else fcntl.LOCK_SH)
             try:
-                with self.w.lock('coordinator'):
-                    return self.dispatch(operation,args)
+                key=None
+                if operation in _JOB_WRITES and isinstance(args.get('jid'),str):
+                    key='service-job:'+args['jid']
+                elif operation in _PROJECT_OPERATIONS and isinstance(args.get('project_id'),str):
+                    key='service-project:'+args['project_id']
+                with w.lock(key) if key is not None else nullcontext():
+                    return self.dispatch(operation,args,workspace=w)
             finally:fcntl.flock(lock,fcntl.LOCK_UN)
-    def dispatch(self,operation,args):
+    def dispatch(self,operation,args,*,workspace=None):
+        w=workspace if workspace is not None else self.w
         if operation=='reconcile_remote':
             from .remote_store import RemoteStore
-            return RemoteStore(self.w).reconcile()
+            return RemoteStore(w).reconcile()
         if operation in ('migrate_feishu','rollback_feishu'):
             from .migration import Migration
-            return (Migration(self.w).run if operation=='migrate_feishu' else Migration(self.w).rollback)(**args)
+            return (Migration(w).run if operation=='migrate_feishu' else Migration(w).rollback)(**args)
         if operation in ('feishu_query','feishu_stage_job'):
             from .feishu import Feishu
-            remote=Feishu(self.w)
+            remote=Feishu(w)
             if operation=='feishu_query':
                 args=dict(args)
                 args.setdefault('projection',['项目ID','项目名称','状态'] if args.get('entity')=='projects' else ['任务ID','标题','所属项目ID','所属项目名称','状态','版本号'])
             return (remote.rows if operation=='feishu_query' else remote.stage_job)(**args)
         from .workflow import Workflow
-        flow=Workflow(self.w)
+        flow=Workflow(w)
         from .files import Files
-        files=Files(self.w)
+        files=Files(w)
         from .projects import Projects
-        projects=Projects(self.w)
+        projects=Projects(w)
         from .context import Context
         from .git_store import GitStore
-        context=Context(self.w)
-        extra={'prepare_work_context':context.prepare,'get_project_overview':context.overview,
-               'list_project_memory':Timeline(self.w).list_memory,'read_project_memory':Timeline(self.w).read_memory,
+        context=Context(w)
+        jobs=Jobs(w)
+        retrieval=Retrieval(w)
+        timeline=Timeline(w)
+
+        def resume(jid,detail='brief'):
+            jobs.file(jid)  # Validate identity before using it as a lock key.
+            with w.lock('service-job:'+jid):
+                job=jobs.get(jid)
+                result=jobs.resume_record(job,detail=detail)
+                result['work_context']=context.prepare_record(job,detail=detail)
+                if len(job['scope']['project_ids'])!=1 or not result['work_context'].get('observation'):
+                    result['context_entry']=dict(operation='prepare_work_context',jid=jid)
+                return result
+
+        def resume_session(session_id):
+            return resume(flow.session_job_id(session_id))
+
+        def prepare_context(project_id=None,jid=None,session_id=None,intent='',detail='brief'):
+            # Resolve the binding once; it could be rebound during this call.
+            if session_id and not jid:
+                jid=flow.session_job_id(session_id,missing_ok=True)
+            if jid:
+                jobs.file(jid)
+                with w.lock('service-job:'+jid):
+                    return context.prepare(project_id=project_id,jid=jid,intent=intent,detail=detail)
+            return context.prepare(project_id=project_id,intent=intent,detail=detail)
+
+        extra={'prepare_work_context':prepare_context,'get_project_overview':context.overview,
+               'list_project_memory':timeline.list_memory,'read_project_memory':timeline.read_memory,
                'mark_context_read':context.mark_read,'save_work_checkpoint':context.save,
-               'read_project_file':Retrieval(self.w).read_project_file,
-               'compare_project_file':Retrieval(self.w).compare_project_file}
+               'read_project_file':retrieval.read_project_file,'compare_project_file':retrieval.compare_project_file}
         if operation=='initialize_project_git':
-            return GitStore(self.w,args['project_id']).initialize()
+            return GitStore(w,args['project_id']).initialize()
         if operation=='read_memory_version':
-            return Retrieval(self.w).read_project_file(args['project_id'],'记忆/TIMELINE.md',args['commit'])
-        methods={'get_project':projects.get,'update_project':projects.update,'write_work_file':files.write,'publish_file':files.publish,'job_directories':files.directories,'claim_job':flow.claim,'renew_claim':flow.renew,'release_job':flow.release,'resolve_job':flow.resolve,'bind_session':flow.bind,'resume_session':flow.session,'append_timeline':Timeline(self.w).append,'list_projects':self.w.project_query,'create_project':self.w.project_create,'update_index':Retrieval(self.w).update,'search_sources':Retrieval(self.w).search,'read_source':Retrieval(self.w).read,'create_job':Jobs(self.w).create,'list_jobs':Jobs(self.w).query,'list_jobs_full':Jobs(self.w).list,'resume_job':Jobs(self.w).resume,'checkpoint_job':Jobs(self.w).checkpoint,'doctor':Maintenance(self.w).doctor}
+            return retrieval.read_project_file(args['project_id'],'记忆/TIMELINE.md',args['commit'])
+        methods={'get_project':projects.get,'update_project':projects.update,'write_work_file':files.write,'publish_file':files.publish,'job_directories':files.directories,'claim_job':flow.claim,'renew_claim':flow.renew,'release_job':flow.release,'resolve_job':flow.resolve,'bind_session':flow.bind,'resume_session':resume_session,'append_timeline':timeline.append,'list_projects':w.project_query,'create_project':w.project_create,'update_index':retrieval.update,'search_sources':retrieval.search,'read_source':retrieval.read,'create_job':jobs.create,'list_jobs':jobs.query,'list_jobs_full':jobs.list,'resume_job':resume,'checkpoint_job':jobs.checkpoint,'doctor':Maintenance(w).doctor}
         methods.update(extra)
         if operation=='save_artifact':
             args=dict(args)
             content=args.pop('content',None);encoded=args.pop('content_base64',None)
             if (content is None)==(encoded is None):raise Error('INVALID_ARGUMENT','Supply text or base64, exclusively')
             args['content']=base64.b64decode(encoded,validate=True) if encoded is not None else content.encode('utf-8')
-            return Artifacts(self.w).save(**args)
+            return Artifacts(w).save(**args)
         if operation not in methods:raise Error('INVALID_ARGUMENT','Unknown operation')
         result=methods[operation](**args)
-        if operation in ('resume_job','resume_session'):
-            jid=result['job_id']
-            ids=result['scope']['project_ids']
-            if len(ids)==1 and GitStore(self.w,ids[0]).enabled:
-                result['work_context']=context.prepare(jid=jid,detail=args.get('detail','brief'))
-            else:
-                result['context_entry']=dict(operation='prepare_work_context',jid=jid)
         if operation in ('get_project','create_job'):
             result['context_entry']=dict(operation='prepare_work_context',**({'jid':result['job_id']} if operation=='create_job' else {'project_id':result['project_id']}))
         if operation in ('checkpoint_job','release_job'):
-            return Jobs(self.w).brief(args['jid'])
+            return jobs.brief(args['jid'])
         if operation in ('claim_job','renew_claim'):
             return {'job_id':result['job_id'],'revision':result['revision'],'lease':result['lease']}
         return result
