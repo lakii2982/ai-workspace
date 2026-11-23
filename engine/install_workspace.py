@@ -9,6 +9,7 @@ import subprocess
 import sys
 import tomllib
 
+from desktop_install import CLIENTS, codex_config, configure, config_json, detect
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
 
@@ -52,25 +53,15 @@ def client_config(workspace: Path, launcher: Path, agent: str):
     server = {"command": str(launcher), "args": ["--mcp"], "env": {"AIWS_WORKSPACE": str(workspace)}}
     if agent == "codex":
         path = workspace / ".codex" / "config.toml"
-        command = json.dumps(str(launcher), ensure_ascii=False)
-        data = json.dumps(str(workspace), ensure_ascii=False)
-        body = (
-            f'[mcp_servers.aiws]\ncommand = {command}\nargs = ["--mcp"]\n'
-            f'env = {{ AIWS_WORKSPACE = {data} }}\n'
-        )
-        if path.is_file() and not path.is_symlink() and not path.parent.is_symlink():
-            existing = tomllib.loads(path.read_text(encoding="utf-8")).get("mcp_servers", {}).get("aiws")
-            if existing == server or uses_working_legacy_launcher(existing, workspace):
-                return None
-        return path, body
-    if agent == "claude":
+        old = tomllib.loads(path.read_text()).get("mcp_servers", {}).get("aiws") if path.exists() else None
+        legacy = dict(old or {})
+        legacy.pop("tools", None)
+        codex_config(path, server, uses_working_legacy_launcher(legacy, workspace))
+    elif agent == "claude":
         path = workspace / ".mcp.json"
-        server = {"type": "stdio", **server}
-        if path.is_file() and not path.is_symlink():
-            existing = json.loads(path.read_text(encoding="utf-8")).get("mcpServers", {}).get("aiws")
-            if existing == server or uses_working_legacy_launcher(existing, workspace, type="stdio"):
-                return None
-        return path, json.dumps({"mcpServers": {"aiws": server}}, ensure_ascii=False, indent=2) + "\n"
+        existing = json.loads(path.read_text()).get("mcpServers", {}).get("aiws") if path.exists() else None
+        if not uses_working_legacy_launcher(existing, workspace, type="stdio"):
+            config_json(path, {"type": "stdio", **server})
     return None
 
 
@@ -107,7 +98,7 @@ def install(workspace: Path, agent: str) -> None:
         (workspace / "AGENTS.md", (source / "AGENTS.md").read_text(encoding="utf-8")),
         (workspace / "START.md", (source / "WORKSPACE.md").read_text(encoding="utf-8")),
     ]
-    if agent == "claude":
+    if "claude" in agent.split(","):
         documents.append((workspace / "CLAUDE.md", "@AGENTS.md\n"))
     files = []
     for path, content in documents:
@@ -116,19 +107,20 @@ def install(workspace: Path, agent: str) -> None:
         if not path.exists():
             files.append((path, content))
 
-    config = client_config(workspace, launcher, agent)
-    if config:
-        path, content = config
-        if path.parent.is_symlink():
-            raise ValueError(f"Refusing symbolic link: {path.parent}")
-        check_file(path, content)
-        files.append(config)
-
+    clients = agent.split(",")
+    if any(client not in (*CLIENTS, "claude", "cli") for client in clients):
+        raise ValueError("Unknown desktop client")
     env = {**os.environ, "AIWS_WORKSPACE": str(workspace)}
     subprocess.run([str(launcher), "init"], check=True, stdout=subprocess.DEVNULL, env=env)
     for path, content in files:
         path.parent.mkdir(parents=True, exist_ok=True)
         write_file(path, content)
+
+    desktop_results = []
+    for client in dict.fromkeys(clients):
+        client_config(workspace, launcher, client)
+        if client in CLIENTS:
+            desktop_results.append(configure(client, workspace, launcher, activate=True))
 
     response = subprocess.check_output([str(launcher), "doctor"], text=True, env=env)
     health = json.loads(response)
@@ -137,12 +129,15 @@ def install(workspace: Path, agent: str) -> None:
     asyncio.run(asyncio.wait_for(check_mcp(launcher, workspace), timeout=30))
     print(json.dumps({
         "core": str(source), "workspace": str(workspace), "launcher": str(launcher),
-        "agent": agent, "doctor": "healthy", "mcp": "verified",
+        "agent": agent, "clients": desktop_results, "doctor": "healthy", "mcp": "verified",
     }, ensure_ascii=False, indent=2))
 
 
 if __name__ == "__main__":
     try:
+        if sys.argv[1:] == ["--detect"]:
+            print(json.dumps(detect(), ensure_ascii=False))
+            sys.exit(0)
         install(Path(sys.argv[1]).expanduser().resolve(), sys.argv[2])
     except Exception as exc:
         raise SystemExit(f"AI WorkSpace setup failed: {exc}") from None

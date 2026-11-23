@@ -1,5 +1,6 @@
 import os
 from mcp.server.fastmcp import FastMCP
+from mcp.types import ToolAnnotations
 from .service import Service
 from .core import Error
 
@@ -15,7 +16,7 @@ def invoke(operation,args):
     except (OSError,ValueError,subprocess.TimeoutExpired) as e:
         return {'ok':False,'error':{'code':'ENTRY_UNAVAILABLE','message':type(e).__name__}}
 
-@server.tool()
+@server.tool(annotations=ToolAnnotations(readOnlyHint=True, destructiveHint=False))
 def list_projects(query:str='',limit:int=20,offset:int=0)->dict:
     """Discover stable project identities. Never infer project scope from the working directory."""
     return invoke('list_projects',dict(query=query,limit=limit,offset=offset))
@@ -46,7 +47,7 @@ def save_artifact(jid:str,relative:str,content:str|None=None,content_base64:str|
 
 def main():server.run(transport='stdio')
 
-@server.tool()
+@server.tool(annotations=ToolAnnotations(readOnlyHint=True, destructiveHint=False))
 def list_jobs(project_id:str|None=None,query:str='',status:str|None='active',limit:int=20,offset:int=0)->dict:
     """Find tasks using bounded summaries. Multiple matches require disambiguation."""
     return invoke('list_jobs',dict(project_id=project_id,query=query,status=status,limit=limit,offset=offset))
@@ -171,7 +172,7 @@ def resolve_publication(jid:str,project_id:str,decision_id:str,approve:bool,sour
     return invoke("resolve_publication", locals())
 
 
-@server.tool()
+@server.tool(annotations=ToolAnnotations(readOnlyHint=True, destructiveHint=False))
 def list_decisions(project_id:str,jid:str|None=None,state:str|None=None,limit:int=20,offset:int=0)->dict:
     """Find pending or resolved publication decisions."""
     return invoke("list_decisions", locals())
@@ -183,13 +184,13 @@ def save_scenario(jid:str,title:str,instructions:str,reason:str,confirmed:bool=F
     return invoke("save_scenario", locals())
 
 
-@server.tool()
+@server.tool(annotations=ToolAnnotations(readOnlyHint=True, destructiveHint=False))
 def read_scenario(scenario_id:str,version:int|None=None)->dict:
     """Read an exact revision of a personal workflow."""
     return invoke("read_scenario", locals())
 
 
-@server.tool()
+@server.tool(annotations=ToolAnnotations(readOnlyHint=True, destructiveHint=False))
 def list_scenarios(limit:int=20,offset:int=0)->dict:
     """Browse available personal workflows."""
     return invoke("list_scenarios", locals())

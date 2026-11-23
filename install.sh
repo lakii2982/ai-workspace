@@ -2,7 +2,7 @@
 set -eu
 
 usage() {
-    echo "Usage: ./install.sh [WORKSPACE] [--agent codex|claude|cli]"
+    echo "Usage: ./install.sh [WORKSPACE] [--agent CLIENT[,CLIENT...]]"
     echo "Default workspace: Workspace next to the source checkout."
 }
 
@@ -22,16 +22,12 @@ if [ "$#" -ne 0 ]; then
     [ "$#" -eq 2 ] && [ "$1" = "--agent" ] || { usage >&2; exit 2; }
     agent=$2
 fi
-case "$agent" in
-    codex|claude|cli) ;;
-    *) usage >&2; exit 2 ;;
-esac
+
 
 case "$(uname -s)" in
     Darwin|Linux) ;;
     *) echo "AI WorkSpace requires macOS or Linux." >&2; exit 1 ;;
 esac
-command -v git >/dev/null 2>&1 || { echo "Install Git and rerun this command." >&2; exit 1; }
 
 if command -v uv >/dev/null 2>&1; then
     uv_bin=$(command -v uv)
