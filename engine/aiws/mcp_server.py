@@ -139,3 +139,63 @@ def mark_context_read(jid:str,observation_commit:str,paths:list[str],lease_token
 def save_work_checkpoint(jid:str,revision:int,context_patch:dict|None=None,patch:dict|None=None,lease_token:str|None=None)->dict:
     """After saving files and significant memory, snapshot project and record exact continuation position."""
     return invoke('save_work_checkpoint',dict(jid=jid,revision=revision,context_patch=context_patch,patch=patch,lease_token=lease_token))
+
+
+@server.tool()
+def create_project(name:str)->dict:
+    """Create a project in this workspace."""
+    return invoke("create_project", locals())
+
+
+@server.tool()
+def checkout_draft(jid:str,project_id:str,name:str,lease_token:str|None=None)->dict:
+    """Edit only the returned private copy; commit it by ID."""
+    return invoke("checkout_draft", locals())
+
+
+@server.tool()
+def commit_draft(jid:str,copy_id:str,lease_token:str|None=None)->dict:
+    """Commit the edited copy if the main draft still has its original version."""
+    return invoke("commit_draft", locals())
+
+
+@server.tool()
+def request_publication(jid:str,project_id:str,name:str,target_name:str,reason:str,lease_token:str|None=None)->dict:
+    """Request human review of a saved draft version."""
+    return invoke("request_publication", locals())
+
+
+@server.tool()
+def resolve_publication(jid:str,project_id:str,decision_id:str,approve:bool,source_hash:str,note:str='',lease_token:str|None=None)->dict:
+    """Record the human decision and publish only the approved version."""
+    return invoke("resolve_publication", locals())
+
+
+@server.tool()
+def list_decisions(project_id:str,jid:str|None=None,state:str|None=None,limit:int=20,offset:int=0)->dict:
+    """Find pending or resolved publication decisions."""
+    return invoke("list_decisions", locals())
+
+
+@server.tool()
+def save_scenario(jid:str,title:str,instructions:str,reason:str,confirmed:bool=False,expected_version:int=0,scenario_id:str|None=None,lease_token:str|None=None)->dict:
+    """Store reusable instructions with case-specific details replaced by variables."""
+    return invoke("save_scenario", locals())
+
+
+@server.tool()
+def read_scenario(scenario_id:str,version:int|None=None)->dict:
+    """Read an exact revision of a personal workflow."""
+    return invoke("read_scenario", locals())
+
+
+@server.tool()
+def list_scenarios(limit:int=20,offset:int=0)->dict:
+    """Browse available personal workflows."""
+    return invoke("list_scenarios", locals())
+
+
+@server.tool()
+def apply_scenario(jid:str,scenario_id:str,version:int|None=None,lease_token:str|None=None)->dict:
+    """Bind the workflow revision to the task and return its instructions."""
+    return invoke("apply_scenario", locals())

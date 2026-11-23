@@ -19,7 +19,8 @@ _EXCLUSIVE_OPERATIONS = {
 # resolving a bound session. Low-level file and revision locks remain in place.
 _JOB_WRITES = {
     'checkpoint_job', 'claim_job', 'renew_claim', 'release_job', 'mark_context_read',
-    'save_work_checkpoint', 'save_artifact', 'write_work_file', 'publish_file',
+    'request_publication', 'resolve_publication', 'checkout_draft', 'commit_draft',
+    'save_scenario', 'apply_scenario', 'save_work_checkpoint', 'save_artifact', 'write_work_file', 'publish_file',
 }
 _PROJECT_OPERATIONS = {'get_project', 'update_project', 'append_timeline', 'initialize_project_git'}
 
@@ -63,6 +64,8 @@ class Service:
         flow=Workflow(w)
         from .files import Files
         files=Files(w)
+        from .scenarios import Scenarios
+        desktop = Scenarios(w)
         from .projects import Projects
         projects=Projects(w)
         from .context import Context
@@ -78,6 +81,7 @@ class Service:
                 job=jobs.get(jid)
                 result=jobs.resume_record(job,detail=detail)
                 result['work_context']=context.prepare_record(job,detail=detail)
+                result['scenarios'] = desktop.bindings(jid)
                 if len(job['scope']['project_ids'])!=1 or not result['work_context'].get('observation'):
                     result['context_entry']=dict(operation='prepare_work_context',jid=jid)
                 return result
@@ -105,6 +109,10 @@ class Service:
             return retrieval.read_project_file(args['project_id'],'记忆/TIMELINE.md',args['commit'])
         methods={'get_project':projects.get,'update_project':projects.update,'write_work_file':files.write,'publish_file':files.publish,'job_directories':files.directories,'claim_job':flow.claim,'renew_claim':flow.renew,'release_job':flow.release,'resolve_job':flow.resolve,'bind_session':flow.bind,'resume_session':resume_session,'append_timeline':timeline.append,'list_projects':w.project_query,'create_project':w.project_create,'update_index':retrieval.update,'search_sources':retrieval.search,'read_source':retrieval.read,'create_job':jobs.create,'list_jobs':jobs.query,'list_jobs_full':jobs.list,'resume_job':resume,'checkpoint_job':jobs.checkpoint,'doctor':Maintenance(w).doctor}
         methods.update(extra)
+        for name in ('request_publication', 'resolve_publication', 'list_decisions',
+                     'checkout_draft', 'commit_draft', 'list_scenarios',
+                     'read_scenario', 'save_scenario', 'apply_scenario'):
+            methods[name] = getattr(desktop, name)
         if operation=='save_artifact':
             args=dict(args)
             content=args.pop('content',None);encoded=args.pop('content_base64',None)
