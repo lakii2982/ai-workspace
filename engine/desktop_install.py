@@ -155,5 +155,9 @@ def configure(client, workspace, launcher, *, activate=False, source=None):
         if activate:
             if not shutil.which('dsh'):
                 raise ValueError('DeepSeek Harness desktop command is unavailable')
-            subprocess.run(command, check=True, stdout=sys.stderr)
+            install = subprocess.run(command, capture_output=True, text=True)
+            if install.returncode:
+                detail = (install.stderr or install.stdout).strip().splitlines()
+                result.update(status='blocked', detail=detail[-1] if detail else 'DSH plugin installation failed',
+                              action='首次打开 DSH Desktop 初始化；保存任务，完全退出后重新运行本安装入口。')
     return result

@@ -98,11 +98,14 @@ class Desktop:
         incoming = hashlib.sha256(data).hexdigest()
         existing = next((a for a in self.jobs.get(jid)['artifacts']
                          if a['path'] == record['source'] and a['hash'] == incoming), None)
-        if existing and target.is_file() and digest(target) == incoming:
+        matches_copy = target.is_file() and digest(target) == incoming
+        if existing and matches_copy:
             result = existing
         else:
-            result = Artifacts(self.w).save(jid, record['source'], data, record['base_hash'],
-                                            lease_token=lease_token)
+            # A previous save may have replaced the file before persisting
+            # its job manifest. Compare the identical bytes again under lock.
+            expected = incoming if matches_copy else record['base_hash']
+            result = Artifacts(self.w).save(jid, record['source'], data, expected, lease_token=lease_token)
         put_json(meta, {**record, 'committed': result})
         return result
 
