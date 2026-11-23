@@ -285,6 +285,8 @@ class Context:
         ctx={**j.get('context',{}),**(context_patch or {})}
         Jobs.validate_context(ctx)
         git=GitStore(self.w,j['scope']['project_ids'][0])
-        snap=git.snapshot(checkpoint_id=jid+'-'+str(revision+1))
-        ctx.update(checkpoint_commit=snap['commit'],checkpoint_ref=snap['ref'],base_commit=git.inspect().get('head'))
+        if git.enabled or ctx.get('checkpoint_commit'):
+            snap = git.snapshot(checkpoint_id=jid+'-'+str(revision+1))
+            ctx.update(checkpoint_commit=snap['commit'], checkpoint_ref=snap['ref'],
+                       base_commit=git.inspect().get('head'))
         return jobs.checkpoint(jid,revision,{**(patch or {}),'context':ctx},lease_token=lease_token)

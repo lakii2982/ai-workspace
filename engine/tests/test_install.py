@@ -14,7 +14,7 @@ def test_install_keeps_core_and_workspace_separate(tmp_path):
     core = root / "aiws_core"
     runtime = core / "engine" / ".venv" / "bin"
     runtime.mkdir(parents=True)
-    for path in ("aiws", "install.sh", "AGENTS.md", "WORKSPACE.md", "engine/install_workspace.py"):
+    for path in ("aiws", "install.sh", "AGENTS.md", "WORKSPACE.md", "engine/install_workspace.py", "engine/desktop_install.py", "engine/upgrade.py"):
         shutil.copy2(checkout / path, core / path)
 
     # Reuse the test interpreter while exercising the real installer and launchers.
@@ -49,7 +49,11 @@ def test_install_keeps_core_and_workspace_separate(tmp_path):
     server = {
         "command": str(core / "aiws"), "args": ["--mcp"], "env": {"AIWS_WORKSPACE": str(default)},
     }
-    assert config["mcp_servers"]["aiws"] == server
+    registered = config["mcp_servers"]["aiws"].copy()
+    approvals = registered.pop("tools")
+    assert approvals["resume_job"]["approval_mode"] == "approve"
+    assert "resolve_publication" not in approvals
+    assert registered == server
     assert not (default / "aiws").exists()
     assert not (core / ".workspace").exists()
 

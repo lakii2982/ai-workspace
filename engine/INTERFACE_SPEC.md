@@ -66,3 +66,10 @@ DELIVERABLE_REQUIRED：任务转completed时，若 工作/JOB/工作稿/ 仍有�
 单协调主机按任务或项目锁定冲突的读-检查-写；工作空间级维护仍独占。远端字段比对检测入口外修改，仍不声称飞书 API 提供原子 CAS，也不支持不同协调主机并行写入。远端成功但本地中断后，manifest和pending回执用于恢复。恢复副本默认offline staging，不自动写远端。
 
 日期时间字段契约：任务表「更新时间」「认领有效期」为 datetime，style.format=`yyyy-MM-dd HH:mm`。CLI CellValue 为带时区 RFC3339 或 null；更新时间从 canonical updated_at 转换，租约 expires 从 Unix 秒转换；UTC 毫秒归一化后比较，时区偏移等价不算漂移，真实时刻变化仍拒绝。执行数据保留原始精度与数据指纹；空租约不写 epoch。项目表暂无时间值字段。
+
+## 员工桌面端
+
+- `checkout_draft(jid,project_id,name,lease_token?,create=false)` 返回基于磁盘当前内容的副本路径与 ID，创建新文件时指定 create。编辑后 `commit_draft(jid,copy_id,lease_token?)` 校验主稿原始版本，冲突时原稿和副本分别保留。副本提交成功后其 ID 固定对应当次结果。
+- `request_publication(jid,project_id,name,target_name,reason,lease_token?)` 生成绑定源和目标版本的决定事项。`list_decisions(project_id,jid?,state?,limit?,offset?)` 可分页。用户审阅后 `resolve_publication(jid,project_id,decision_id,approve,source_hash,note?,lease_token?)` 处理指定版本。被新版替换的源稿确认时标为 superseded。
+- `save_scenario(jid,title,instructions,reason,confirmed?,expected_version?,scenario_id?,lease_token?)` 保存已泛化的模板、步骤和验收示例。更新时携带原版本及长期修改确认。`list_scenarios` 和 `read_scenario` 用于检索或读取旧版。`apply_scenario(jid,scenario_id,version?,lease_token?)` 将版本固定到任务。任务接续返回 scenarios 与 publication_decisions。
+- MCP 的 `verify_desktop_binding` 读取当前握手中的客户端名称和版本；CLI `call list_host_bindings` 可查看历史连接。首次连接记录不代表重启或弹窗测试已通过。

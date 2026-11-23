@@ -1,21 +1,28 @@
 import os
-from mcp.server.fastmcp import FastMCP
+from mcp.server.fastmcp import FastMCP, Context
+from mcp.types import ToolAnnotations
 from .service import Service
 from .core import Error
 
-server=FastMCP('AI WorkSpace')
+server=FastMCP('AI WorkSpace', instructions=(
+    'Use the bound project and resume the task. Edit Office files with checkout_draft and '
+    'commit_draft. Ask the user about a specific version before resolve_publication. '
+    'Generalize a completed task into reusable variables and steps with save_scenario. '
+    'Use apply_scenario to pin the revision. Permanent changes require user confirmation.'
+))
 def invoke(operation,args):
     # Fresh process shares current CLI code after upgrades; no long-lived stale writer.
     import json
     import subprocess
     import sys
     try:
-        result=subprocess.run([sys.executable,'-m','aiws','--workspace',os.environ['AIWS_WORKSPACE'],'call',operation,'--params',json.dumps(args,ensure_ascii=False)],capture_output=True,text=True,timeout=180)
+        entry = [os.environ['AIWS_LAUNCHER']] if os.environ.get('AIWS_LAUNCHER') else [sys.executable, '-m', 'aiws']
+        result=subprocess.run([*entry,'--workspace',os.environ['AIWS_WORKSPACE'],'call',operation,'--params',json.dumps(args,ensure_ascii=False)],capture_output=True,text=True,timeout=180)
         return json.loads(result.stdout)
     except (OSError,ValueError,subprocess.TimeoutExpired) as e:
         return {'ok':False,'error':{'code':'ENTRY_UNAVAILABLE','message':type(e).__name__}}
 
-@server.tool()
+@server.tool(annotations=ToolAnnotations(readOnlyHint=True, destructiveHint=False))
 def list_projects(query:str='',limit:int=20,offset:int=0)->dict:
     """Discover stable project identities. Never infer project scope from the working directory."""
     return invoke('list_projects',dict(query=query,limit=limit,offset=offset))
@@ -46,7 +53,7 @@ def save_artifact(jid:str,relative:str,content:str|None=None,content_base64:str|
 
 def main():server.run(transport='stdio')
 
-@server.tool()
+@server.tool(annotations=ToolAnnotations(readOnlyHint=True, destructiveHint=False))
 def list_jobs(project_id:str|None=None,query:str='',status:str|None='active',limit:int=20,offset:int=0)->dict:
     """Find tasks using bounded summaries. Multiple matches require disambiguation."""
     return invoke('list_jobs',dict(project_id=project_id,query=query,status=status,limit=limit,offset=offset))
@@ -139,3 +146,84 @@ def mark_context_read(jid:str,observation_commit:str,paths:list[str],lease_token
 def save_work_checkpoint(jid:str,revision:int,context_patch:dict|None=None,patch:dict|None=None,lease_token:str|None=None)->dict:
     """After saving files and significant memory, snapshot project and record exact continuation position."""
     return invoke('save_work_checkpoint',dict(jid=jid,revision=revision,context_patch=context_patch,patch=patch,lease_token=lease_token))
+
+
+@server.tool()
+def create_project(name:str)->dict:
+    """Create a project in this workspace."""
+    return invoke("create_project", locals())
+
+
+@server.tool()
+def checkout_draft(jid:str,project_id:str,name:str,lease_token:str|None=None,create:bool=False)->dict:
+    """Edit only the returned private copy; commit it by ID."""
+    return invoke("checkout_draft", locals())
+
+
+@server.tool()
+def commit_draft(jid:str,copy_id:str,lease_token:str|None=None)->dict:
+    """Commit the edited copy if the main draft still has its original version."""
+    return invoke("commit_draft", locals())
+
+
+@server.tool()
+def request_publication(jid:str,project_id:str,name:str,target_name:str,reason:str,lease_token:str|None=None)->dict:
+    """Request human review of a saved draft version."""
+    return invoke("request_publication", locals())
+
+
+@server.tool()
+def resolve_publication(jid:str,project_id:str,decision_id:str,approve:bool,source_hash:str,note:str='',lease_token:str|None=None)->dict:
+    """Record the human decision and publish only the approved version."""
+    return invoke("resolve_publication", locals())
+
+
+@server.tool(annotations=ToolAnnotations(readOnlyHint=True, destructiveHint=False))
+def list_decisions(project_id:str,jid:str|None=None,state:str|None=None,limit:int=20,offset:int=0)->dict:
+    """Find pending or resolved publication decisions."""
+    return invoke("list_decisions", locals())
+
+
+@server.tool()
+def save_scenario(jid:str,title:str,instructions:str,reason:str,confirmed:bool=False,expected_version:int=0,scenario_id:str|None=None,lease_token:str|None=None)->dict:
+    """Store reusable instructions with case-specific details replaced by variables."""
+    return invoke("save_scenario", locals())
+
+
+@server.tool(annotations=ToolAnnotations(readOnlyHint=True, destructiveHint=False))
+def read_scenario(scenario_id:str,version:int|None=None)->dict:
+    """Read an exact revision of a personal workflow."""
+    return invoke("read_scenario", locals())
+
+
+@server.tool(annotations=ToolAnnotations(readOnlyHint=True, destructiveHint=False))
+def list_scenarios(limit:int=20,offset:int=0)->dict:
+    """Browse available personal workflows."""
+    return invoke("list_scenarios", locals())
+
+
+@server.tool()
+def apply_scenario(jid:str,scenario_id:str,version:int|None=None,lease_token:str|None=None)->dict:
+    """Bind the workflow revision to the task and return its instructions."""
+    return invoke("apply_scenario", locals())
+
+
+@server.tool()
+def upgrade_core()->dict:
+    """Upgrade this employee installation from the repository's main release after the user requests it."""
+    import json
+    import subprocess
+    launcher = os.environ.get('AIWS_LAUNCHER')
+    if not launcher:
+        return {'ok': False, 'error': {'code': 'ENTRY_UNAVAILABLE', 'message': 'Start MCP through aiws --mcp'}}
+    result = subprocess.run([launcher, 'upgrade'], capture_output=True, text=True)
+    try:
+        return json.loads(result.stdout)
+    except ValueError:
+        return {'ok': False, 'error': {'code': 'UPGRADE_FAILED', 'message': result.stderr[-1000:]}}
+
+@server.tool()
+def verify_desktop_binding(ctx: Context) -> dict:
+    """Verify this desktop session reaches its intended workspace. Report the workspace path to the user."""
+    info = ctx.session.client_params.clientInfo
+    return invoke("record_host_binding", {"client": info.name, "version": info.version})
