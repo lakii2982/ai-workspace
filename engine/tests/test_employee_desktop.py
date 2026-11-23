@@ -51,6 +51,9 @@ def test_office_handoff_publication_and_scenario(tmp_path):
     resolved = call('resolve_publication', approve)
     assert resolved['state'] == 'published' and client_b.call('resolve_publication', approve) == resolved
     resumed = client_b.call('resume_job', {'jid': jid})
+    call('save_work_checkpoint', dict(jid=jid, revision=resumed['revision'],
+                                      context_patch={'working_on': '核对后 88'}))
+    assert client_b.call('resume_job', {'jid': jid})['work_context']
     assert resumed['publication_decisions'][pid]['items']
     published = tmp_path / resumed['directories'][0]['deliverables'] / request['target_name']
     assert digest(main) == digest(published) == saved['hash']
