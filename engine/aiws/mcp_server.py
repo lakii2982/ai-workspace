@@ -1,5 +1,5 @@
 import os
-from mcp.server.fastmcp import FastMCP
+from mcp.server.fastmcp import FastMCP, Context
 from mcp.types import ToolAnnotations
 from .service import Service
 from .core import Error
@@ -221,3 +221,9 @@ def upgrade_core()->dict:
         return json.loads(result.stdout)
     except ValueError:
         return {'ok': False, 'error': {'code': 'UPGRADE_FAILED', 'message': result.stderr[-1000:]}}
+
+@server.tool()
+def verify_desktop_binding(ctx: Context) -> dict:
+    """Verify this desktop session reaches its intended workspace. Report the workspace path to the user."""
+    info = ctx.session.client_params.clientInfo
+    return invoke("record_host_binding", {"client": info.name, "version": info.version})

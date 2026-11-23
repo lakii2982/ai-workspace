@@ -94,6 +94,12 @@ def install(workspace: Path, agent: str) -> None:
     if workspace.exists() and (not workspace.is_dir() or (any(workspace.iterdir()) and not initialized)):
         raise ValueError("Choose a new or empty workspace directory.")
 
+    legacy = workspace.parent / "aiws_core"
+    if initialized and legacy != source and (legacy / "aiws").is_file():
+        from upgrade import adopt_legacy
+        if adopt_legacy(legacy, workspace):
+            launcher = legacy / "aiws"
+
     documents = [
         (workspace / "AGENTS.md", (source / "AGENTS.md").read_text(encoding="utf-8")),
         (workspace / "START.md", (source / "WORKSPACE.md").read_text(encoding="utf-8")),
@@ -116,21 +122,26 @@ def install(workspace: Path, agent: str) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)
         write_file(path, content)
 
-    desktop_results = []
-    for client in dict.fromkeys(clients):
-        client_config(workspace, launcher, client)
-        if client in CLIENTS:
-            desktop_results.append(configure(client, workspace, launcher, activate=True))
-
     response = subprocess.check_output([str(launcher), "doctor"], text=True, env=env)
     health = json.loads(response)
     if health.get("result", {}).get("healthy") is not True:
         raise ValueError(f"Workspace doctor failed: {response.strip()}")
     asyncio.run(asyncio.wait_for(check_mcp(launcher, workspace), timeout=30))
+    desktop_results = []
+    for client in dict.fromkeys(clients):
+        try:
+            client_config(workspace, launcher, client)
+            if client in CLIENTS:
+                desktop_results.append(configure(client, workspace, launcher, activate=True, source=source))
+        except (OSError, ValueError, subprocess.SubprocessError) as exc:
+            desktop_results.append(dict(client=client, status='blocked', detail=str(exc)))
+    blocked = [result for result in desktop_results if result['status'] == 'blocked']
     print(json.dumps({
         "core": str(source), "workspace": str(workspace), "launcher": str(launcher),
-        "agent": agent, "clients": desktop_results, "doctor": "healthy", "mcp": "verified",
+        "ok": not blocked, "agent": agent, "clients": desktop_results, "doctor": "healthy", "mcp": "verified",
     }, ensure_ascii=False, indent=2))
+    if blocked:
+        raise SystemExit(1)
 
 
 if __name__ == "__main__":

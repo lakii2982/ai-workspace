@@ -11,7 +11,7 @@ class Scenarios(Desktop):
 
     def save_scenario(self, jid, title, instructions, reason, confirmed=False, expected_version=0,
                       scenario_id=None, lease_token=None):
-        self.guard(jid, lease_token)
+        self.guard(jid, lease_token, allow_closed=True)
         if not all(isinstance(s, str) and s.strip() for s in (title, instructions, reason)):
             raise Error('INVALID_ARGUMENT', 'Supply title, reusable instructions and change reason')
         if type(expected_version) is not int or expected_version < 0:

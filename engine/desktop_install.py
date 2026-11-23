@@ -93,11 +93,10 @@ def archive(path, files):
     save(path, buffer.getvalue())
 
 
-def configure(client, workspace, launcher, *, activate=False):
+def configure(client, workspace, launcher, *, activate=False, source=None):
     entry = {'command': str(launcher), 'args': ['--mcp'], 'env': {'AIWS_WORKSPACE': str(workspace)}}
     directory = workspace / '.workspace' / 'desktop' / client
-    directory.mkdir(parents=True, exist_ok=True)
-    rules = (launcher.parent / 'AGENTS.md').read_text()
+    rules = ((source or launcher.parent) / 'AGENTS.md').read_text()
     skill = '---\nname: aiws\ndescription: 管理本机项目、接续任务、保存成果和复用工作场景。\n---\n\n' + rules
     result = dict(client=client, status='awaiting_host_verification')
     if client == 'codex':
@@ -148,7 +147,7 @@ def configure(client, workspace, launcher, *, activate=False):
         save(directory / 'index.mjs', (Path(__file__).parent / 'adapters/dsh.mjs').read_bytes())
         save(directory / 'cordis.patch.yml', b'- insert:\n    - id: aiws-desktop\n      name: "@local/aiws-desktop"\n')
         save(directory / 'binding.json', encoded(dict(command=str(launcher), workspace=str(workspace),
-             tools=[t.model_dump(mode='json', include={'name','description','inputSchema'}) for t in catalog if t.name != 'upgrade_core'])))
+             tools=[t.model_dump(mode='json', include={'name','description','inputSchema'}) for t in catalog if t.name not in ('upgrade_core', 'verify_desktop_binding')])))
         command = ['dsh', 'plugin', '--profile', 'desktop', 'add', 'link:' + str(directory)]
         result.update(package=str(directory), install_command=command)
         if activate:

@@ -36,6 +36,19 @@ class Desktop:
         self.jobs = Jobs(workspace)
         self.files = Files(workspace)
 
+    def record_host_binding(self, client, version):
+        if not isinstance(client, str) or not client or not isinstance(version, str):
+            raise Error('INVALID_ARGUMENT', 'Missing MCP client identity')
+        record = dict(schema_version=1, client=client[:160], version=version[:100], seen_at=now())
+        path = self.w.path(Path('.workspace/host-bindings', fingerprint(client) + '.json'))
+        put_json(path, record)
+        return {**record, 'workspace': str(self.w.root)}
+
+    def list_host_bindings(self):
+        folder = self.w.path('.workspace/host-bindings')
+        return {'workspace': str(self.w.root), 'items': [
+            load(self.w.path(p.relative_to(self.w.root))) for p in sorted(folder.glob('*.json'))]}
+
     def task_folder(self, jid, project_id):
         for entry in self.files.directories(jid):
             if entry['project_id'] == project_id:
@@ -48,8 +61,13 @@ class Desktop:
         folder = self.task_folder(jid, project_id)
         return self.w.path(Path(folder['work']) / '工作稿' / name)
 
-    def guard(self, jid, lease_token):
-        check_lease(self.jobs.get(jid), lease_token, require=enabled(self.w))
+    def guard(self, jid, lease_token, allow_closed=False):
+        job = self.jobs.get(jid)
+        if job['status'] in ('completed', 'cancelled'):
+            if allow_closed:
+                return
+            raise Error('INVALID_STATE', 'Closed task')
+        check_lease(job, lease_token, require=enabled(self.w))
 
     def checkout_draft(self, jid, project_id, name, lease_token=None, create=False):
         self.guard(jid, lease_token)
@@ -89,7 +107,7 @@ class Desktop:
         return result
 
     def request_publication(self, jid, project_id, name, target_name, reason, lease_token=None):
-        self.guard(jid, lease_token)
+        self.guard(jid, lease_token, allow_closed=True)
         source = self.draft(jid, project_id, name)
         if not source.is_file() or not reason.strip():
             raise Error('INVALID_ARGUMENT', 'A saved draft and a reason are required')
@@ -120,7 +138,7 @@ class Desktop:
         return page([r for r in found if not state or r['state'] == state], limit, offset)
 
     def resolve_publication(self, jid, project_id, decision_id, approve, source_hash, note='', lease_token=None):
-        self.guard(jid, lease_token)
+        self.guard(jid, lease_token, allow_closed=True)
         folder = self.task_folder(jid, project_id)
         path = self.w.path(Path('.workspace/decisions', project_id, jid, identifier(decision_id) + '.json'))
         record = load(path)

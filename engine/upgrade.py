@@ -171,6 +171,39 @@ def restore_pointer(marker, prior):
         atomic(marker, prior.encode())
 
 
+def adopt_legacy(root, workspace):
+    """Bootstrap the previous split-directory release in place, retaining its old runtime."""
+    launcher = root / 'aiws'
+    if not launcher.is_file() or launcher.is_symlink():
+        return False
+    original = launcher.read_bytes()
+    legacy_hash = '13b268aceef2424dfdf025366b91db325a24382cd0235ac6ec08ae8e034e189d'
+    shim = (b'#!/bin/sh\nset -eu\nbase=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)\n'
+            b'exec "$base/engine/.venv/bin/python" "$base/.aiws-releases/bootstrap.py" "$@"\n')
+    if original == shim:
+        return True
+    if hashlib.sha256(original).hexdigest() != legacy_hash:
+        return False
+    releases, state = directories(root, workspace)
+    state.mkdir(parents=True, exist_ok=True)
+    with (releases / 'adopt.lock').open('a+') as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        if launcher.read_bytes() == shim:
+            return True
+        upgrade(root, workspace, state)
+        atomic(releases / 'legacy-launcher', original)
+        atomic(releases / 'bootstrap.py', Path(__file__).read_bytes())
+        # Replace only after checking the candidate. Preserve the executable bit
+        # across rename; a power loss leaves either launcher runnable.
+        with tempfile.NamedTemporaryFile(dir=root, delete=False) as temp:
+            temp.write(shim)
+            temp.flush()
+            os.fchmod(temp.fileno(), 0o755)
+            os.fsync(temp.fileno())
+        Path(temp.name).replace(launcher)
+    return True
+
+
 def main():
     root = Path(__file__).resolve().parents[1]
     args = sys.argv[1:]
