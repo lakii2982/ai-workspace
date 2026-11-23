@@ -2,29 +2,30 @@
 set -eu
 
 usage() {
-    echo "Usage: ./install.sh WORKSPACE [--agent codex|claude|cli]"
+    echo "Usage: ./install.sh [WORKSPACE] [--agent codex|claude|cli]"
+    echo "Default workspace: Workspace next to the source checkout."
 }
 
 if [ "${1:-}" = "--help" ]; then
     usage
     exit 0
 fi
-if [ "$#" -ne 1 ] && [ "$#" -ne 3 ]; then
-    usage >&2
-    exit 2
-fi
-
-workspace=$1
+source_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+workspace="$source_dir/../Workspace"
 agent=cli
-if [ "$#" -eq 3 ]; then
-    [ "$2" = "--agent" ] || { usage >&2; exit 2; }
-    agent=$3
+if [ "$#" -gt 0 ] && [ "$1" != "--agent" ]; then
+    [ -n "$1" ] || { usage >&2; exit 2; }
+    workspace=$1
+    shift
+fi
+if [ "$#" -ne 0 ]; then
+    [ "$#" -eq 2 ] && [ "$1" = "--agent" ] || { usage >&2; exit 2; }
+    agent=$2
 fi
 case "$agent" in
     codex|claude|cli) ;;
     *) usage >&2; exit 2 ;;
 esac
-[ -n "$workspace" ] || { usage >&2; exit 2; }
 
 case "$(uname -s)" in
     Darwin|Linux) ;;
@@ -41,7 +42,6 @@ else
     exit 1
 fi
 
-source_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 engine_dir="$source_dir/engine"
 runtime="$engine_dir/.venv"
 if [ ! -x "$runtime/bin/python" ]; then

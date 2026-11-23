@@ -1,6 +1,6 @@
 # 日常使用
 
-示例中的项目和任务编号以工具实际返回为准。还没有项目时，先运行 `./aiws project create --name '个人知识整理'`。
+以下 CLI 示例在 `aiws_core/` 下执行，默认操作同级 `Workspace/`。项目和任务编号以工具实际返回为准。还没有项目时，先运行 `./aiws project create --name '个人知识整理'`。
 
 ## 主动上下文与项目 Git
 
@@ -41,7 +41,7 @@ get_project_overview 提供任务分组与成果、问题、下一步；不会�
 
 ## 框架演进版：日常执行协议
 
-新工作空间使用本地状态。已配置并启用飞书的工作空间可使用飞书保存共享状态，业务文件仍在本机目录。所有工具必须调用同一工作空间的 `./aiws` 或它的MCP服务，不直接改表、job.json或HANDOFF。保护范围是受控入口，不是操作系统权限。
+新工作空间使用本地状态。已配置并启用飞书的工作空间可使用飞书保存共享状态，业务文件仍在本机目录。通过 `aiws_core/aiws` 或绑定同一工作空间的 MCP 服务操作 `job.json`、`HANDOFF.md` 和数据表。
 
 1. `project list` / `job list` 默认20条；通过 `--params` 传 project_id/query/status/limit/offset。有任务ID直接resume，没有ID用 `call resolve_job`（project为项目ID、全名或别名）；多个匹配必须消歧。
 2. `job resume` 默认摘要。omitted非空表示约束有省略，执行相关动作前用 `detail:"full"`展开。默认不校验所有附件；需要核验时使用完整恢复。
