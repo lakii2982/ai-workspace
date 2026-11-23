@@ -17,10 +17,17 @@ from aiws.core import atomic
 CLIENTS = ('codex', 'claude-desktop', 'workbuddy', 'doubao', 'dsh')
 BUNDLES = {'com.openai.codex': 'codex', 'com.anthropic.claudefordesktop': 'claude-desktop',
            'com.tencent.workbuddy.mac': 'workbuddy', 'com.deepseek.dsh': 'dsh'}
-ROUTINE = ('list_projects', 'get_project', 'list_jobs', 'resolve_job', 'resume_job',
-           'resume_session', 'prepare_work_context', 'search_sources', 'read_source',
-           'read_project_file', 'list_decisions', 'list_scenarios', 'read_scenario',
-           'write_work_file', 'checkout_draft', 'commit_draft', 'save_work_checkpoint')
+ROUTINE = (
+    'list_projects', 'get_project', 'create_project', 'update_project',
+    'get_project_overview', 'list_jobs', 'resolve_job', 'create_job', 'resume_job',
+    'claim_job', 'renew_claim', 'release_job', 'bind_session', 'resume_session',
+    'prepare_work_context', 'search_sources', 'read_source', 'read_project_file',
+    'compare_project_file', 'list_project_memory', 'read_project_memory',
+    'mark_context_read', 'append_timeline', 'checkpoint_job', 'save_work_checkpoint',
+    'write_work_file', 'save_artifact', 'checkout_draft', 'commit_draft',
+    'request_publication', 'list_decisions', 'list_scenarios', 'read_scenario',
+    'apply_scenario',
+)
 
 
 def detect():
@@ -102,7 +109,7 @@ def configure(client, workspace, launcher, *, activate=False, source=None):
     if client == 'codex':
         # The plugin supplies instructions; there is only one MCP registration.
         plugin = workspace / 'plugins' / 'aiws'
-        save(plugin / '.codex-plugin/plugin.json', encoded(dict(name='aiws', version='0.1.0',
+        save(plugin / '.codex-plugin/plugin.json', encoded(dict(name='aiws', version='0.1.1',
              description='在本地工作空间接续任务、管理资料和成果', skills='./skills/')))
         save(plugin / 'skills/aiws/SKILL.md', skill.encode())
         catalog = workspace / '.agents/plugins/marketplace.json'

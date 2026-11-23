@@ -13,6 +13,7 @@
 ## 配置与排障
 
 - Codex 使用数据目录下的 `.codex/config.toml`，Claude Code 使用 `.mcp.json`。两者通过核心目录的 `aiws --mcp` 启动服务，并通过 `AIWS_WORKSPACE` 传入对应的数据目录。客户端配置参考 [Codex MCP](https://developers.openai.com/codex/mcp) 和 [Claude Code MCP](https://code.claude.com/docs/en/mcp)。
+- Codex 从绑定的数据目录开启会话，或使用已经为同一数据目录注册了 `aiws` MCP 的项目。安装器预设日常 MCP 操作直接调用，保留已有的工具级设置。若仍反复出现执行命令的授权弹窗，检查会话是否加载了 `aiws` MCP，并停用指示逐条运行 `aiws … call` 的旧版插件。
 - 安装可以重复执行。安装器保留已有的 `START.md` 和 Agent 规则。若客户端配置发生冲突，更新其中的 `aiws` 条目即可。`command` 填核心目录 `aiws` 的绝对路径，`args` 填 `["--mcp"]`，`env.AIWS_WORKSPACE` 填数据目录的绝对路径，保留其他条目。
 - Python 或依赖安装失败时修复网络或代理后重试。CLI 报异常时用核心入口执行 `doctor`。MCP 启动失败时核对客户端配置中的核心入口与数据目录。
 - 移除工具时可以删除源码检出中的虚拟环境和对应 MCP 条目，资料仍位于独立工作空间。私有备份可能包含业务资料、项目 Git 历史和本地设置，保存在可信位置。
