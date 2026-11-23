@@ -82,6 +82,11 @@ class Service:
                 result=jobs.resume_record(job,detail=detail)
                 result['work_context']=context.prepare_record(job,detail=detail)
                 result['scenarios'] = desktop.bindings(jid)
+                result['publication_decisions'] = {
+                    pid: desktop.list_decisions(pid, jid=jid, limit=10)
+                    for pid in job['scope']['project_ids']
+                    if w.path(f'.workspace/decisions/{pid}/{jid}').is_dir()
+                }
                 if len(job['scope']['project_ids'])!=1 or not result['work_context'].get('observation'):
                     result['context_entry']=dict(operation='prepare_work_context',jid=jid)
                 return result

@@ -148,7 +148,7 @@ def configure(client, workspace, launcher, *, activate=False):
         save(directory / 'index.mjs', (Path(__file__).parent / 'adapters/dsh.mjs').read_bytes())
         save(directory / 'cordis.patch.yml', b'- insert:\n    - id: aiws-desktop\n      name: "@local/aiws-desktop"\n')
         save(directory / 'binding.json', encoded(dict(command=str(launcher), workspace=str(workspace),
-             tools=[t.model_dump(mode='json', include={'name','description','inputSchema'}) for t in catalog])))
+             tools=[t.model_dump(mode='json', include={'name','description','inputSchema'}) for t in catalog if t.name != 'upgrade_core'])))
         command = ['dsh', 'plugin', '--profile', 'desktop', 'add', 'link:' + str(directory)]
         result.update(package=str(directory), install_command=command)
         if activate:

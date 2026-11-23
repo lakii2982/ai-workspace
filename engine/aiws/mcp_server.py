@@ -4,14 +4,20 @@ from mcp.types import ToolAnnotations
 from .service import Service
 from .core import Error
 
-server=FastMCP('AI WorkSpace')
+server=FastMCP('AI WorkSpace', instructions=(
+    'Use the bound project and resume the task. Edit Office files with checkout_draft and '
+    'commit_draft. Ask the user about a specific version before resolve_publication. '
+    'Generalize a completed task into reusable variables and steps with save_scenario. '
+    'Use apply_scenario to pin the revision. Permanent changes require user confirmation.'
+))
 def invoke(operation,args):
     # Fresh process shares current CLI code after upgrades; no long-lived stale writer.
     import json
     import subprocess
     import sys
     try:
-        result=subprocess.run([sys.executable,'-m','aiws','--workspace',os.environ['AIWS_WORKSPACE'],'call',operation,'--params',json.dumps(args,ensure_ascii=False)],capture_output=True,text=True,timeout=180)
+        entry = [os.environ['AIWS_LAUNCHER']] if os.environ.get('AIWS_LAUNCHER') else [sys.executable, '-m', 'aiws']
+        result=subprocess.run([*entry,'--workspace',os.environ['AIWS_WORKSPACE'],'call',operation,'--params',json.dumps(args,ensure_ascii=False)],capture_output=True,text=True,timeout=180)
         return json.loads(result.stdout)
     except (OSError,ValueError,subprocess.TimeoutExpired) as e:
         return {'ok':False,'error':{'code':'ENTRY_UNAVAILABLE','message':type(e).__name__}}
@@ -149,7 +155,7 @@ def create_project(name:str)->dict:
 
 
 @server.tool()
-def checkout_draft(jid:str,project_id:str,name:str,lease_token:str|None=None)->dict:
+def checkout_draft(jid:str,project_id:str,name:str,lease_token:str|None=None,create:bool=False)->dict:
     """Edit only the returned private copy; commit it by ID."""
     return invoke("checkout_draft", locals())
 
@@ -200,3 +206,18 @@ def list_scenarios(limit:int=20,offset:int=0)->dict:
 def apply_scenario(jid:str,scenario_id:str,version:int|None=None,lease_token:str|None=None)->dict:
     """Bind the workflow revision to the task and return its instructions."""
     return invoke("apply_scenario", locals())
+
+
+@server.tool()
+def upgrade_core()->dict:
+    """Upgrade this employee installation from the repository's main release after the user requests it."""
+    import json
+    import subprocess
+    launcher = os.environ.get('AIWS_LAUNCHER')
+    if not launcher:
+        return {'ok': False, 'error': {'code': 'ENTRY_UNAVAILABLE', 'message': 'Start MCP through aiws --mcp'}}
+    result = subprocess.run([launcher, 'upgrade'], capture_output=True, text=True)
+    try:
+        return json.loads(result.stdout)
+    except ValueError:
+        return {'ok': False, 'error': {'code': 'UPGRADE_FAILED', 'message': result.stderr[-1000:]}}

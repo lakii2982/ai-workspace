@@ -51,17 +51,20 @@ class Desktop:
     def guard(self, jid, lease_token):
         check_lease(self.jobs.get(jid), lease_token, require=enabled(self.w))
 
-    def checkout_draft(self, jid, project_id, name, lease_token=None):
+    def checkout_draft(self, jid, project_id, name, lease_token=None, create=False):
         self.guard(jid, lease_token)
         source = self.draft(jid, project_id, name)
-        if not source.is_file():
+        exists = source.is_file()
+        if create and exists:
+            raise Error('CONFLICT', 'Draft already exists')
+        if not exists and not create:
             raise Error('NOT_FOUND', 'Draft does not exist')
-        data = source.read_bytes()
+        data = source.read_bytes() if exists else b''
         copy_id = uuid.uuid4().hex
         folder = Path('.workspace/edits', jid, copy_id)
         copy = folder / 'content' / name
         record = dict(schema_version=1, copy_id=copy_id, source=str(source.relative_to(self.w.root)),
-                      path=str(copy), base_hash=hashlib.sha256(data).hexdigest())
+                      path=str(copy), base_hash=hashlib.sha256(data).hexdigest() if exists else None)
         atomic(self.w.path(copy), data)
         put_json(self.w.path(folder / 'record.json'), record)
         return record
@@ -131,6 +134,7 @@ class Desktop:
         if approve:
             source = self.w.path(record['source'])
             if not source.is_file() or digest(source) != source_hash:
+                put_json(path, {**record, 'state': 'superseded', 'resolved_at': now()})
                 raise Error('CONFLICT', 'Draft changed; request review of the new version')
             target = str(Path(folder['deliverables']) / record['name'])
             # Recover if publishing completed immediately before interruption.
