@@ -14,7 +14,7 @@
 - save_work_checkpoint(jid,revision,context_patch?,patch?,lease_token?)：创建快照后更新任务；在此之前业务文件与记忆已保存。context包含working_on/resume_note/working_files/memory_refs/reviewed_files/base_commit/checkpoint_commit/checkpoint_ref，可缺省。
 - Git快照保存refs/aiws/observations及checkpoints；不改HEAD/分支/真实index。文件变更以Git blob为版本；旧manifest和受控发布校验不因此删除。
 
-所有入口共享 Service。所有结果输出 JSON：成功 ok=true/result；失败 ok=false/error.code/message，CLI 退出码1。--workspace 或 AIWS_WORKSPACE 显式定位；根目录 aiws 启动脚本自动定位。--json 可选，因为默认总是 JSON。
+所有入口共享 Service。CLI 成功返回 `ok=true` 和 `result`，失败返回 `ok=false` 和 `error`，退出码为 1。`aiws_core/aiws` 默认定位同级 `Workspace/`，可用 `--workspace` 或 `AIWS_WORKSPACE` 显式定位。CLI 默认输出 JSON。
 
 基础命令：init；project list/create --name；index update；search --query --project（可重复）--company --professional；source read；job create/list/resume/checkpoint；artifact save；backup；restore；doctor。非快捷参数以 --params JSON 传入。通用 `call 操作名 --params JSON` 与 MCP 对应同名业务操作。
 

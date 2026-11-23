@@ -1,3 +1,9 @@
 #!/bin/sh
+set -eu
 AIWS_ROOT=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
-exec "$AIWS_ROOT/engine/.venv/bin/aiws" --workspace "$AIWS_ROOT" "$@"
+AIWS_WORKSPACE=${AIWS_WORKSPACE:-"$AIWS_ROOT/../Workspace"}
+export AIWS_WORKSPACE
+if [ "${1:-}" = "--mcp" ]; then
+    exec "$AIWS_ROOT/engine/.venv/bin/aiws-mcp"
+fi
+exec "$AIWS_ROOT/engine/.venv/bin/aiws" "$@"

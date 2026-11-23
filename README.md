@@ -8,19 +8,26 @@
 
 > https://github.com/lakii2982/ai-workspace 帮我安装 AI WorkSpace。请读取仓库的初始化指南，直接在本机执行并验证，完成后带我开始第一个项目。
 
-Agent 会处理 Git 仓库、Python 环境、工作空间目录和客户端配置，运行健康检查并调用一次 MCP 工具。默认工作空间是 `~/AI WorkSpace`，也可以在消息里指定新的空目录。使用 macOS 或 Linux；本地模式无需飞书账号。
+Agent 会下载程序、准备 Python 环境、初始化资料目录，并验证 CLI 和 MCP。默认安装在 `~/AI WorkSpace/`，也可以指定其他安装根目录。支持 macOS 和 Linux，本地模式无需飞书账号。
+
+| 安装根目录内 | 用途 |
+|---|---|
+| `aiws_core/` | Git 检出、安装器、命令入口、核心代码、测试与 Python 环境。 |
+| `Workspace/` | 项目资料、工作稿、成果、知识库和本地运行状态。 |
 
 ## 自己从终端安装
 
 确认系统已有 Git 和 [uv](https://docs.astral.sh/uv/getting-started/installation/)。
 
 ```sh
-git clone --branch v0.1.0 --depth 1 https://github.com/lakii2982/ai-workspace.git
-cd ai-workspace
-./install.sh "$HOME/AI WorkSpace" --agent codex
+mkdir -p "$HOME/AI WorkSpace"
+cd "$HOME/AI WorkSpace"
+git clone https://github.com/lakii2982/ai-workspace.git aiws_core
+./aiws_core/install.sh --agent codex
+./aiws_core/aiws doctor
 ```
 
-Claude Code 用 `--agent claude`。其他有终端能力的 Agent 用 `--agent cli`，通过 `./aiws` 运行完整工作流。在工作空间里开启新会话，按客户端提示信任目录或启用项目 MCP。先读工作空间的 `START.md`，也可以直接告诉 Agent 想做的事。
+Claude Code 用 `--agent claude`。其他有终端能力的 Agent 用 `--agent cli`。在 `Workspace/` 里打开 Agent 会话，按客户端提示信任目录或启用项目 MCP，参阅 `Workspace/START.md` 开始使用。
 
 - [Agent 初始化指南、手工安装与排障](engine/INSTALL.md)
 - [日常工作流程](engine/USER_GUIDE.md)
