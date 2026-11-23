@@ -117,10 +117,12 @@ def configure(client, workspace, launcher, *, activate=False, source=None):
             save(catalog, encoded(market))
         result.update(marketplace=str(catalog), action='在 Codex 打开此工作空间，启用 AIWS')
     elif client == 'workbuddy':
-        preferred = Path.home() / '.workbuddy/connectors/default/mcp.json'
-        path = preferred if preferred.parent.is_dir() else Path.home() / '.workbuddy/mcp.json'
+        path = Path.home() / '.workbuddy/mcp.json'
+        package = directory / 'aiws-mcp.json'
+        save(package, encoded({'mcpServers': {'aiws': {'type': 'stdio', **entry}}}))
         config_json(path, {'type': 'stdio', **entry})
-        result['config'] = str(path)
+        result.update(config=str(path), package=str(package),
+                      action='在 WorkBuddy 自定义连接器中确认 AIWS')
     elif client == 'claude-desktop':
         path = directory / 'AIWS.mcpb'
         manifest = dict(manifest_version='0.3', name='aiws', version='0.1.0', description='本地工作空间',

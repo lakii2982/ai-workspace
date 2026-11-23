@@ -37,7 +37,7 @@ def test_clients_preserve_settings_and_office_binding(tmp_path, monkeypatch):
     assert before == config.read_bytes() and tomllib.loads(before.decode())['mcp_servers']['other']
     with pytest.raises(ValueError, match='already bound'):
         desktop.codex_config(config, {**entry, 'command': 'different'})
-    path = home / '.workbuddy/connectors/default/mcp.json'
+    path = home / '.workbuddy/mcp.json'
     path.parent.mkdir(parents=True)
     path.write_text('{"mcpServers":{"old":{"command":"existing"}}}')
     desktop.configure('workbuddy', workspace, launcher)
