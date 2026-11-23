@@ -51,17 +51,34 @@ def test_install_keeps_core_and_workspace_separate(tmp_path):
     }
     registered = config["mcp_servers"]["aiws"].copy()
     approvals = registered.pop("tools")
-    assert approvals["resume_job"]["approval_mode"] == "approve"
-    assert "resolve_publication" not in approvals
+    for tool in ("resume_job", "create_project", "create_job", "bind_session",
+                 "append_timeline", "save_artifact", "save_work_checkpoint"):
+        assert approvals[tool]["approval_mode"] == "approve"
+    assert {"publish_file", "resolve_publication", "upgrade_core"}.isdisjoint(approvals)
     assert registered == server
+    skill = (default / "plugins" / "aiws" / "skills" / "aiws" / "SKILL.md").read_text()
+    assert "AIWS 项目、任务和资料操作统一通过 MCP" in skill
     assert not (default / "aiws").exists()
     assert not (core / ".workspace").exists()
 
     notes = default / "START.md"
     notes.write_text("Existing user notes\n")
+    config_path = default / ".codex" / "config.toml"
+    original = config_path.read_text()
+    config_path.write_text(original.split("[mcp_servers.aiws.tools.", 1)[0] + """
+[mcp_servers.aiws.tools.resume_job]
+approval_mode = "prompt"
+
+[mcp_servers.other]
+command = "existing"
+""")
     run("aiws", "project", "create", "--name", "默认数据")
     run("install.sh", "--agent", "codex")
     assert notes.read_text() == "Existing user notes\n"
+    upgraded = tomllib.loads(config_path.read_text())["mcp_servers"]
+    assert upgraded["other"] == {"command": "existing"}
+    assert upgraded["aiws"]["tools"]["resume_job"]["approval_mode"] == "prompt"
+    assert upgraded["aiws"]["tools"]["append_timeline"]["approval_mode"] == "approve"
 
     custom = root / "另外一个工作空间"
     install = run("install.sh", str(custom), "--agent", "claude")
