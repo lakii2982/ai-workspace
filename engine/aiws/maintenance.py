@@ -17,7 +17,11 @@ class Maintenance:
         for j in jobs:
             for a in Jobs(self.w).resume(j['job_id'],detail='full')['artifact_integrity']:
                 if a['integrity']!='ok':bad.append(a['path'])
-        return {'healthy':integrity=='ok' and not bad,'sqlite':integrity,'projects':len(projects),'jobs':len(jobs),'changed_artifacts':bad}
+        from .timeline import Timeline
+        unstructured={p['project_id']:Timeline(self.w).unstructured_count(p['project_id']) for p in projects}
+        unstructured={k:v for k,v in unstructured.items() if v}
+        return {'healthy':integrity=='ok' and not bad,'sqlite':integrity,'projects':len(projects),
+                'jobs':len(jobs),'changed_artifacts':bad,'timeline_unstructured':unstructured}
     def backup(self):
         # All mutating services take the shared workspace gate; backup takes exclusive gate.
         import fcntl

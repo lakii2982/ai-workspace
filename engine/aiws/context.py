@@ -21,19 +21,22 @@ class Context:
 
     def memories(self, project_id, **filters):
         from .timeline import Timeline
+        items, events = [], []
         page=Timeline(self.w).list_memory(project_id,limit=100,**filters)
-        items=list(page['items'])
-        while page['has_more']:
-            page=Timeline(self.w).list_memory(project_id,limit=100,offset=page['next_offset'],**filters)
+        while True:
             items.extend(page['items'])
-        return {**page,'items':items,'has_more':False,'next_offset':None}
+            events.extend(page.get('events',[]))
+            if not page['has_more']:break
+            page=Timeline(self.w).list_memory(project_id,limit=100,offset=page['next_offset'],**filters)
+        return {**page,'items':items,'events':events,'events_total':len(events),
+                'has_more':False,'next_offset':None}
 
     @staticmethod
     def memory_view(data, detail):
         if detail=='full':
             return data
         result=dict(data)
-        for key in ('items','tentative','pending_review'):
+        for key in ('items','tentative','pending_review','events'):
             result[key]=[{k:v for k,v in r.items() if k not in ('body','current_body','sources')}
                          for r in data.get(key,[])]
         result['legacy']=[{**r,'text':r['text'][:600],
