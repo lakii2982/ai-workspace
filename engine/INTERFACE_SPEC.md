@@ -57,7 +57,9 @@ DELIVERABLE_REQUIRED：任务转completed时，若 工作/JOB/工作稿/ 仍有�
 - get_project(project_id)：返回state_hash；update_project(project_id,expected_hash,patch)：可改name/aliases/status/status_note/goal/owner，路径和ID不变。
 - write_work_file(jid,project_id,name,content,kind='draft',expected_hash?,lease_token?)，kind为draft/process。
 - publish_file(jid,project_id,source,source_hash,name,expected_hash?,confirm=false,lease_token?)：具体源版本确认后发布，旧目标进入历史版本。任务已关闭（completed/cancelled）时无需租约即可发布，用于存量成果物迁移；confirm=true 仍必须由用户对具体版本给出。
-- completed要求verification数组逐项匹配acceptance，包含criterion/path/hash；阻塞未清空时拒绝完成。
+- move_work_file(jid,project_id,source,target_kind,name?,expected_hash,lease_token?)：在工作稿与过程材料之间移动，字节不变。expected_hash 必填；目标已存在、源已变化、存在未提交的 checkout 或待决发布时拒绝。
+- delete_work_file(jid,project_id,relative,expected_hash,lease_token?)：只允许 工作/ 下；删除前旧字节写入 history/files；成果正本不能删除，改版请用新版本发布。
+- completed要求verification数组与acceptance等长、逐项匹配criterion；path与hash必须成对（决策类任务可留空），填写时校验范围与指纹；任务已有已发布成果时，至少一条证据的hash必须指向该成果。阻塞未清空时拒绝完成。本地与飞书模式规则相同。
 - migrate_feishu(assignments={},activate=false)：备份后逐项比对远端读回与本地原状态；activate切换权威。rollback_feishu：回读最新状态再切回本地，不删除远端记录。
 - reconcile_remote：回读prepared操作，只确认确实匹配的远端结果；未知结果保持未解决。
 
