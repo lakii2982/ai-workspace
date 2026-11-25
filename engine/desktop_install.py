@@ -4,6 +4,7 @@ import io
 import json
 import os
 import plistlib
+import re
 import shlex
 import shutil
 import subprocess
@@ -68,26 +69,41 @@ def encoded(value):
     return (json.dumps(value, indent=2, ensure_ascii=False) + '\n').encode()
 
 
-def codex_config(path, entry, legacy=False):
+def codex_config(path, entry, legacy=False, tool_defaults=None):
     original = path.read_text() if path.exists() else ''
     config = tomllib.loads(original).get('mcp_servers', {})
     existing = config.get('aiws')
     extra = []
     if existing is None:
         extra += ['[mcp_servers.aiws]', 'command = ' + json.dumps(entry['command'], ensure_ascii=False),
-                  'args = ["--mcp"]', 'env = { AIWS_WORKSPACE = ' +
+                  'args = ["--mcp"]', 'required = true', 'env = { AIWS_WORKSPACE = ' +
                   json.dumps(entry['env']['AIWS_WORKSPACE'], ensure_ascii=False) + ' }']
     elif not legacy and (existing.get('command') != entry['command'] or
                          existing.get('args') != entry['args'] or
                          existing.get('env', {}).get('AIWS_WORKSPACE') != entry['env']['AIWS_WORKSPACE']):
         raise ValueError(f'AIWS already bound to a different installation: {path}')
-    for tool in ROUTINE:
+    if existing is not None:
+        if (existing.get('enabled') is False or existing.get('required') is False
+                or existing.get('startup_readiness', 'connection') != 'connection'):
+            raise ValueError(f'AIWS must be enabled and required with live startup readiness: {path}')
+        if 'required' not in existing:
+            header = re.search(r'(?m)^\s*\[mcp_servers\.aiws\][ \t]*(?:#[^\n]*)?\n', original)
+            if header is None:
+                raise ValueError(f'Use a [mcp_servers.aiws] section to set required = true: {path}')
+            original = original[:header.end()] + 'required = true\n' + original[header.end():]
+    modes = dict.fromkeys(ROUTINE, 'approve')
+    modes.update(tool_defaults or {})
+    for tool, mode in modes.items():
         if tool not in (existing or {}).get('tools', {}):
-            extra.extend([f'[mcp_servers.aiws.tools.{tool}]', 'approval_mode = "approve"'])
+            extra.extend([f'[mcp_servers.aiws.tools.{json.dumps(tool)}]', f'approval_mode = {json.dumps(mode)}'])
+    result = original
     if extra:
-        result = original.rstrip('\n') + '\n' + '\n'.join(extra) + '\n'
-        tomllib.loads(result)  # Catch inline or dotted-key table collisions before writing.
-        save(path, result.encode())
+        result = (original.rstrip('\n') + '\n' if original else '') + '\n'.join(extra) + '\n'
+    config = tomllib.loads(result)['mcp_servers']['aiws']
+    if config.get('required') is not True:
+        raise ValueError(f'Unable to set required = true in [mcp_servers.aiws]: {path}')
+    save(path, result.encode())
+    return config
 
 
 def archive(path, files):
@@ -109,7 +125,7 @@ def configure(client, workspace, launcher, *, activate=False, source=None):
     if client == 'codex':
         # The plugin supplies instructions; there is only one MCP registration.
         plugin = workspace / 'plugins' / 'aiws'
-        save(plugin / '.codex-plugin/plugin.json', encoded(dict(name='aiws', version='0.1.1',
+        save(plugin / '.codex-plugin/plugin.json', encoded(dict(name='aiws', version='0.1.2',
              description='在本地工作空间接续任务、管理资料和成果', skills='./skills/')))
         save(plugin / 'skills/aiws/SKILL.md', skill.encode())
         catalog = workspace / '.agents/plugins/marketplace.json'
@@ -122,7 +138,8 @@ def configure(client, workspace, launcher, *, activate=False, source=None):
             market['plugins'].append({'name': 'aiws', 'source': source, 'category': 'Productivity',
                                       'policy': {'installation': 'AVAILABLE', 'authentication': 'ON_INSTALL'}})
             save(catalog, encoded(market))
-        result.update(marketplace=str(catalog), action='在 Codex 打开此工作空间，启用 AIWS')
+        result.update(marketplace=str(catalog),
+                      action='信任实际打开的目录，新建 Codex 会话并运行 verify_desktop_binding 核对数据目录')
     elif client == 'workbuddy':
         path = Path.home() / '.workbuddy/mcp.json'
         package = directory / 'aiws-mcp.json'
