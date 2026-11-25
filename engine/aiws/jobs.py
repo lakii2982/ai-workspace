@@ -110,8 +110,12 @@ class Jobs:
             pending.append({'project_id':pid,'work':drafts.relative_to(self.w.root).as_posix(),'deliverables':done.relative_to(self.w.root).as_posix(),'files':[x.relative_to(drafts).as_posix() for x in files[:10]],'count':len(files)})
         return pending
     def checkpoint(self,jid,revision,patch,reopen=False,lease_token=None):
-        allowed={'title','goal','acceptance','status','last_agent','completed','next_steps','open_issues','decisions','artifacts','sources','verification','context'}
-        if not isinstance(patch,dict) or not set(patch)<=allowed:raise Error('INVALID_ARGUMENT','Unknown or immutable job fields')
+        allowed={'title','goal','acceptance','status','last_agent','completed','next_steps','open_issues','decisions','verification','context'}
+        if not isinstance(patch,dict) or not set(patch)<=allowed:
+            managed=set(patch)&{'artifacts','sources'} if isinstance(patch,dict) else set()
+            if managed:
+                raise Error('INVALID_ARGUMENT',f'{", ".join(sorted(managed))} is managed by save_artifact/publish_file; remove it from the checkpoint patch')
+            raise Error('INVALID_ARGUMENT','Unknown or immutable job fields')
         with self.w.lock('job:'+jid):
             j=self.get(jid)
             from .workflow import check_lease
