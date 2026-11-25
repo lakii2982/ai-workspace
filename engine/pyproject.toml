@@ -8,7 +8,7 @@ version = "0.1.0"
 description = "Local tool-neutral knowledge and task workspace"
 requires-python = ">=3.11"
 license = "MIT"
-dependencies = ["python-docx==1.2.0", "openpyxl==3.1.5", "pypdf==6.4.0", "mcp==1.21.1"]
+dependencies = ["python-docx==1.2.0", "openpyxl==3.1.5", "pypdf==6.4.0", "mcp==2.3.0"]
 
 [project.optional-dependencies]
 test = ["pytest==8.4.2", "reportlab==4.4.4"]
