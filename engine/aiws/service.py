@@ -22,7 +22,8 @@ _JOB_WRITES = {
     'request_publication', 'resolve_publication', 'checkout_draft', 'commit_draft',
     'save_scenario', 'apply_scenario', 'save_work_checkpoint', 'save_artifact', 'write_work_file', 'publish_file',
 }
-_PROJECT_OPERATIONS = {'get_project', 'update_project', 'append_timeline', 'initialize_project_git'}
+_PROJECT_OPERATIONS = {'get_project', 'update_project', 'append_timeline', 'initialize_project_git',
+                       'save_memory_note', 'delete_memory_note'}
 
 class Service:
     def __init__(self,root):self.w=Workspace(root)
@@ -68,6 +69,8 @@ class Service:
         desktop = Scenarios(w)
         from .projects import Projects
         projects=Projects(w)
+        from .memories import Memories
+        memories=Memories(w)
         from .context import Context
         from .git_store import GitStore
         context=Context(w)
@@ -106,6 +109,8 @@ class Service:
 
         extra={'prepare_work_context':prepare_context,'get_project_overview':context.overview,
                'list_project_memory':timeline.list_memory,'read_project_memory':timeline.read_memory,
+               'list_memory_notes':memories.list,'read_memory_note':memories.read,
+               'save_memory_note':memories.save,'delete_memory_note':memories.delete,
                'mark_context_read':context.mark_read,'save_work_checkpoint':context.save,
                'read_project_file':retrieval.read_project_file,'compare_project_file':retrieval.compare_project_file}
         if operation=='initialize_project_git':

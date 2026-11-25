@@ -6,7 +6,9 @@ server=FastMCP('AI WorkSpace', instructions=(
     'Use the bound project and resume the task. Edit Office files with checkout_draft and '
     'commit_draft. Ask the user about a specific version before resolve_publication. '
     'Generalize a completed task into reusable variables and steps with save_scenario. '
-    'Use apply_scenario to pin the revision. Permanent changes require user confirmation.'
+    'Use apply_scenario to pin the revision. Permanent changes require user confirmation. '
+    'prepare_work_context returns the project memory index: read only the notes whose '
+    'description matters, and keep durable facts current with save_memory_note.'
 ))
 def invoke(operation,args):
     # Fresh process shares current CLI code after upgrades; no long-lived stale writer.
@@ -125,6 +127,26 @@ def list_project_memory(project_id:str,query:str='',categories:list[str]|None=No
 @server.tool()
 def read_project_memory(project_id:str,event_id:str,include_history:bool=True)->dict:
     return invoke('read_project_memory',dict(project_id=project_id,event_id=event_id,include_history=include_history))
+
+@server.tool(annotations=ToolAnnotations(readOnlyHint=True, destructiveHint=False))
+def list_memory_notes(project_id:str,query:str='',types:list[str]|None=None,detail:str='index',limit:int=20,offset:int=0)->dict:
+    """Recall durable project memories from their index; read only the notes whose description matters."""
+    return invoke('list_memory_notes',dict(project_id=project_id,query=query,types=types,detail=detail,limit=limit,offset=offset))
+
+@server.tool(annotations=ToolAnnotations(readOnlyHint=True, destructiveHint=False))
+def read_memory_note(project_id:str,name:str)->dict:
+    """Read one memory note with its links, backlinks and current hash."""
+    return invoke('read_memory_note',dict(project_id=project_id,name=name))
+
+@server.tool()
+def save_memory_note(project_id:str,name:str,description:str,type:str,content:str,source:str|None=None,expected_hash:str|None=None)->dict:
+    """Create or update one durable project memory; source may point at the timeline event it distills (event:<ID>). Pass expected_hash when the note exists."""
+    return invoke('save_memory_note',dict(project_id=project_id,name=name,description=description,type=type,content=content,source=source,expected_hash=expected_hash))
+
+@server.tool()
+def delete_memory_note(project_id:str,name:str,expected_hash:str|None=None)->dict:
+    """Delete a memory that is wrong or no longer true; expected_hash must match the current file."""
+    return invoke('delete_memory_note',dict(project_id=project_id,name=name,expected_hash=expected_hash))
 
 @server.tool()
 def read_project_file(project_id:str,path:str,commit:str|None=None)->dict:

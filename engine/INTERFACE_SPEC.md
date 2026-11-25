@@ -14,6 +14,18 @@
 - save_work_checkpoint(jid,revision,context_patch?,patch?,lease_token?)：创建快照后更新任务；在此之前业务文件与记忆已保存。context包含working_on/resume_note/working_files/memory_refs/reviewed_files/base_commit/checkpoint_commit/checkpoint_ref，可缺省。
 - Git快照保存refs/aiws/observations及checkpoints；不改HEAD/分支/真实index。文件变更以Git blob为版本；旧manifest和受控发布校验不因此删除。
 
+## 项目记忆条目（Claude 风格）
+
+每个项目在 `记忆/` 下同时保存两类记忆：`TIMELINE.md` 是只追加的任务事件（上一节的 timeline memory），`MEMORY.md` 与 `条目/` 是长期事实。条目一条记忆一个 Markdown 文件，frontmatter 为 `name`、`description`、`metadata.type`（user/feedback/project/reference，可附 `created`、`updated`、`source`），正文用 `[[名称]]` 互链。文件是权威，`MEMORY.md` 由核心根据文件重建；手工改动索引会在 `index_drift` 中报告，下一次写入时修复。
+
+- list_memory_notes(project_id,query='',types=None,detail='index'|'full',limit=20,offset=0)：返回索引文本、按名称/标题/描述/正文匹配的条目、类型计数、`needs_review` 清单、断链和索引漂移。detail=full 附带正文；分页上限 100。
+- read_memory_note(project_id,name)：返回单条正文、链接解析、反向链接与当前 hash，供更新或删除前读取。
+- save_memory_note(project_id,name,description,type,content,source=None,expected_hash=None)：新建或更新。已存在的条目必须带当前 hash，否则 `CONFLICT`；`name` 为小写字母、数字、短横线或中文的 slug（≤64）；`description` 单行（≤200）；`content` ≤20000 字符；feedback 与 project 正文必须包含 `**Why:**` 与 `**How to apply:**`。相同内容重试返回 `replayed=true`。
+- delete_memory_note(project_id,name,expected_hash=None)：hash 必须匹配当前文件；删除后重建索引，并返回仍指向它的 `backlinks`。
+- 分工：时间线保存带 sources、日期、责任人和后续的事件与 supersede 演进，默认只返回当前有效结论；记忆条目保存跨任务仍成立的当前真相。决定先写时间线，影响以后工作时再蒸馏为记忆条目，`source` 约定为 `event:<事件ID>`（不校验事件是否存在，便于先写条目后补事件）；同一事实不重复叙述。
+- prepare_work_context 的 `memory_notes`（索引与条目描述）和 get_project_overview 的 `memory_notes` 用于接续时加载记忆；时间线记忆仍是 `memory`/`memory_digest`，两者独立维护。
+- `记忆/` 不进入检索索引：记忆是上下文，不是来源证据。需要作为证据的事实应回读原件并记录指纹。
+
 所有入口共享 Service。CLI 成功返回 `ok=true` 和 `result`，失败返回 `ok=false` 和 `error`，退出码为 1。`aiws_core/aiws` 默认定位同级 `Workspace/`，可用 `--workspace` 或 `AIWS_WORKSPACE` 显式定位。CLI 默认输出 JSON。
 
 基础命令：init；project list/create --name；index update；search --query --project（可重复）--company --professional；source read；job create/list/resume/checkpoint；artifact save；backup；restore；doctor。非快捷参数以 --params JSON 传入。通用 `call 操作名 --params JSON` 与 MCP 对应同名业务操作。

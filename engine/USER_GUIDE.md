@@ -16,6 +16,13 @@ Agent 开始工作先定位并恢复已有任务。resume_job/resume_session 直
 
 项目记忆通过 append_timeline 的可选 memory 字段记录 category/state/reason/supersedes；list_project_memory 和 read_project_memory 用于查询当前决定及理由。手改时间线不一致内容提示待整理，不继续当作核实后的约束。历史字节可经 read_project_file(...,path='记忆/TIMELINE.md',commit=...) 回看。
 
+长期有效的知识用记忆条目保存，沿用 Claude 的记忆方式：`记忆/条目/` 下一条记忆一个 Markdown 文件，`记忆/MEMORY.md` 是索引。类型分为 user（用户角色与长期偏好）、feedback（对工作方式的纠正与已确认做法）、project（无法从资料推导的目标与约束）、reference（外部资源指针）。开始工作时先看 prepare_work_context 返回的 `memory_notes` 索引，按描述只读取相关条目，不全量加载。写入用 save_memory_note；更新或删除前先 read_memory_note，并带当前 hash。索引由核心按文件重建，手改 `MEMORY.md` 不会改变实际记忆。时间线记忆记录任务内的决定演进，记忆条目记录跨任务长期有效的事实，两者不互相替代。决定先写时间线并保留来源；需要跨任务记住时再蒸馏成记忆，`source` 写 `event:<事件ID>`，同一事实不重复叙述。
+
+```sh
+./aiws call list_memory_notes --params '{"project_id":"PRJ-0001"}'
+./aiws call save_memory_note --params '{"project_id":"PRJ-0001","name":"report-style","description":"用户偏好要点式汇报","type":"feedback","content":"# 汇报用要点\n\n**Why:** 用户在手机上阅读。\n\n**How to apply:** 交付前压缩长段落。"}'
+```
+
 Git 版本与工作区以磁盘已保存内容为准。ignored 文件、嵌套仓库和不能解析的附件不会被宣称已读。普通 clone/push 不完整携带 AIWS 自定义 refs，完整迁移应使用工作空间私有备份，备份包含已注册项目的 Git 目录与任务状态。
 
 get_project_overview 提供任务分组与成果、问题、下一步；不会把任务完成比例当成项目完成度。prepare 的 brief 若有省略，按 expand 取 full；Agent 仍须阅读需要修改的正文，不能只看摘要。
@@ -54,7 +61,7 @@ get_project_overview 提供任务分组与成果、问题、下一步；不会�
 
 项目元数据用get_project取得state_hash，再以update_project提交expected_hash/patch。状态说明与状态分开。单选状态展示中文，API继续使用稳定英文值。
 
-文件布局：新项目为 `项目/PRJ编号_名称/`；新任务为 `工作/JOB编号_标题/工作稿或过程材料/` 和 `成果/JOB编号_标题/`；时间线为项目内 `记忆/TIMELINE.md`。旧项目与任务路径兼容保留，不改动历史来源链接。
+文件布局：新项目为 `项目/PRJ编号_名称/`；新任务为 `工作/JOB编号_标题/工作稿或过程材料/` 和 `成果/JOB编号_标题/`；时间线为项目内 `记忆/TIMELINE.md`，长期记忆为 `记忆/MEMORY.md` 索引与 `记忆/条目/`。旧项目与任务路径兼容保留，不改动历史来源链接。
 
 ### 过程稿与成果物
 

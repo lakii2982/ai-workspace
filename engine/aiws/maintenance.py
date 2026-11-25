@@ -17,7 +17,15 @@ class Maintenance:
         for j in jobs:
             for a in Jobs(self.w).resume(j['job_id'],detail='full')['artifact_integrity']:
                 if a['integrity']!='ok':bad.append(a['path'])
-        return {'healthy':integrity=='ok' and not bad,'sqlite':integrity,'projects':len(projects),'jobs':len(jobs),'changed_artifacts':bad}
+        from .memories import Memories
+        memory_review={}
+        for p in projects:
+            notes=Memories(self.w).overview(p['project_id'])
+            if notes.get('warnings') or notes.get('index_drift'):
+                memory_review[p['project_id']]={k:notes[k] for k in ('warnings','index_drift')
+                                                if k in notes}
+        return {'healthy':integrity=='ok' and not bad,'sqlite':integrity,'projects':len(projects),
+                'jobs':len(jobs),'changed_artifacts':bad,'memory_review':memory_review}
     def backup(self):
         # All mutating services take the shared workspace gate; backup takes exclusive gate.
         import fcntl
