@@ -23,7 +23,7 @@ jobs:
           fetch-depth: 0
       - name: Fetch base branch
         run: git fetch --no-tags origin "${{ github.base_ref }}"
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: '3.12'
       - name: Check PR title, branch and compatibility changes
@@ -38,7 +38,7 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: '3.12'
       - run: python -m pip install ruff==0.17.6
