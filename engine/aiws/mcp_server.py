@@ -89,6 +89,18 @@ def write_work_file(jid:str,project_id:str,name:str,content:str,kind:str='draft'
     return invoke('write_work_file',dict(jid=jid,project_id=project_id,name=name,content=content,kind=kind,expected_hash=expected_hash,lease_token=lease_token))
 
 @server.tool()
+def move_work_file(jid:str,project_id:str,source:str,target_kind:str,name:str|None=None,expected_hash:str|None=None,lease_token:str|None=None)->dict:
+    """Move a draft into process material (or back) without changing its bytes. expected_hash is required."""
+    return invoke('move_work_file',dict(jid=jid,project_id=project_id,source=source,target_kind=target_kind,name=name,expected_hash=expected_hash,lease_token=lease_token))
+
+
+@server.tool()
+def delete_work_file(jid:str,project_id:str,relative:str,expected_hash:str|None=None,lease_token:str|None=None)->dict:
+    """Delete a draft or process file; published deliverables cannot be deleted. expected_hash is required."""
+    return invoke('delete_work_file',dict(jid=jid,project_id=project_id,relative=relative,expected_hash=expected_hash,lease_token=lease_token))
+
+
+@server.tool()
 def publish_file(jid:str,project_id:str,source:str,source_hash:str,name:str,expected_hash:str|None=None,confirm:bool=False,lease_token:str|None=None)->dict:
     """Publish only a specifically approved source hash; previous file goes to history."""
     return invoke('publish_file',dict(jid=jid,project_id=project_id,source=source,source_hash=source_hash,name=name,expected_hash=expected_hash,confirm=confirm,lease_token=lease_token))

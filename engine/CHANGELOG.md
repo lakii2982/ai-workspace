@@ -18,4 +18,6 @@
 
 ### 新增
 
+- `move_work_file`：在工作稿与过程材料之间移动，字节不变；存在未提交 checkout 或待决发布时拒绝。
+- `delete_work_file`：删除工作稿或过程材料，旧字节进入历史；成果正本不可删除。
 - CLI `--debug`：失败时把 traceback 输出到 stderr，stdout 仍为 JSON。
