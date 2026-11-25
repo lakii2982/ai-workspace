@@ -43,7 +43,6 @@ DELIVERABLE_REQUIRED：任务转completed时，若 工作/JOB/工作稿/ 仍有�
 - resume_job: detail默认brief；完整材料与hash校验需detail=full。brief明确返回omitted、expand、integrity，不能把未校验解释为校验通过。字段有长度和条数上限；被省略的约束执行前须展开。
 - append_timeline: project_id/event_id/event_date/record_date/kind/summary/status/impact/owner/next_action/sources/expected_hash。项目内原子追加；旧hash冲突拒绝；相同事件重试去重；不确认建议为事实。
 - feishu_query: entity=projects或jobs，key/value精确过滤，limit默认20最大100，offset分页。
-- feishu_stage_job: jid/operation_id。当前仅试运行登记，不更新已有远端任务，不切换权威；超时保留prepared记录，禁止盲重试创建。操作同ID异内容拒绝。
 - `.workspace/feishu.json` 保存资源坐标，不存凭据。CLI用户凭据由lark-cli维护。单协调工作空间锁不提供多主机并发保障。
 
 ## 状态管理、成果发布与迁移

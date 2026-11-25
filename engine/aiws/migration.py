@@ -6,9 +6,9 @@ from .jobs import Jobs
 
 class Migration:
     def __init__(self,w):self.w=w
-    def run(self,assignments=None,activate=False):
+    def run(self,assignments=None,activate=False,adopt_staging=None):
         if enabled(self.w):raise Error('INVALID_STATE','Already active')
-        assignments=assignments or {}
+        assignments=assignments or {};adopt_staging=adopt_staging or {}
         projects=self.w.projects();known={p['project_id'] for p in projects}
         jobs=Jobs(self.w).list()
         unresolved=[]
@@ -25,10 +25,11 @@ class Migration:
             data={**p,'status_note':'由aiws统一维护；文件保留原目录'}
             results.append(remote.write('projects',p['project_id'],data,bootstrap=True))
         for j in jobs:
-            # Migration alone may adopt the known staging record, never an arbitrary record.
+            # Migration alone may adopt an explicitly named staging record, never an arbitrary record.
             row=remote.read_row('jobs',j['job_id'])
-            if row and not row.get('执行数据'):
-                if j['job_id']!='JOB-0012' or row.get('操作ID')!='stage-job0012-rev2':raise Error('CONFLICT','Unmanaged remote row')
+            adopt=adopt_staging.get(j['job_id'])
+            if row and not row.get('执行数据') and adopt!=row.get('操作ID'):
+                raise Error('CONFLICT','Unmanaged remote row')
             remote.write_job_migration(j)
             actual=remote.job(j['job_id'])
             if actual!=j:raise Error('INVALID_DATA','Migration roundtrip mismatch '+j['job_id'])
