@@ -130,6 +130,20 @@ class Jobs:
             if delivered:continue
             pending.append({'project_id':pid,'work':drafts.relative_to(self.w.root).as_posix(),'deliverables':done.relative_to(self.w.root).as_posix(),'files':[x.relative_to(drafts).as_posix() for x in files[:10]],'count':len(files)})
         return pending
+    @staticmethod
+    def verification_shape(checks,acceptance):
+        """Shape rules shared by every checkpoint; files are read only on completion."""
+        if not isinstance(checks,list) or len(checks)!=len(acceptance):
+            raise Error('ACCEPTANCE_REQUIRED','One evidence record per acceptance criterion required')
+        for criterion,check in zip(acceptance,checks):
+            if not isinstance(check,dict) or check.get('criterion')!=criterion:
+                raise Error('ACCEPTANCE_REQUIRED','Evidence must name its acceptance criterion')
+            path,hashed=check.get('path'),check.get('hash')
+            if bool(path)!=bool(hashed):
+                raise Error('ACCEPTANCE_REQUIRED','Evidence path and hash must be given together')
+            if path is not None and (not isinstance(path,str) or not isinstance(hashed,str)):
+                raise Error('ACCEPTANCE_REQUIRED','Invalid evidence reference')
+        return checks
     def checkpoint(self,jid,revision,patch,reopen=False,lease_token=None):
         allowed={'title','goal','acceptance','status','last_agent','completed','next_steps','open_issues','decisions','verification','context'}
         if not isinstance(patch,dict) or not set(patch)<=allowed:
@@ -144,23 +158,28 @@ class Jobs:
             check_lease(j,lease_token,require=enabled(self.w))
             if j['revision']!=revision:raise Error('CONFLICT','Job revision changed')
             new=patch.get('status',j['status'])
+            acceptance=patch.get('acceptance',j['acceptance'])
+            if 'verification' in patch:
+                self.verification_shape(patch['verification'],acceptance)
             transitions={'new':{'new','in_progress','blocked'},'in_progress':{'in_progress','review','blocked'},'review':{'review','in_progress','completed','blocked'},'blocked':{'blocked','in_progress','review'},'completed':{'completed'}}
             if new=='cancelled' and j['status'] not in ('completed','cancelled'):transitions[j['status']].add('cancelled')
             transitions['cancelled']={'cancelled'}
             if new not in transitions[j['status']] and not (reopen and j['status']=='completed' and new=='in_progress'):raise Error('INVALID_STATE','Invalid transition; completed jobs require explicit reopen')
             if new=='completed' and j['status']!='completed':
-                if not j['acceptance'] or patch.get('open_issues',j['open_issues']):raise Error('ACCEPTANCE_REQUIRED','Acceptance criteria and resolved blockers required')
+                if not acceptance or patch.get('open_issues',j['open_issues']):raise Error('ACCEPTANCE_REQUIRED','Acceptance criteria and resolved blockers required')
                 pending=self.unpromoted(j)
                 if pending:
                     p=pending[0]
                     raise Error('DELIVERABLE_REQUIRED',f"工作稿仍有{p['count']}份文件而成果目录为空：{p['work']}；定稿用 publish_file 发布到 {p['deliverables']}，不交付的移入过程材料")
-            if new=='completed' and j['status']!='completed' and enabled(self.w):
                 checks=patch.get('verification',j.get('verification',[]))
-                if not isinstance(checks,list) or len(checks)!=len(j['acceptance']):raise Error('ACCEPTANCE_REQUIRED','One evidence record per acceptance criterion required')
-                for criterion,check in zip(j['acceptance'],checks):
-                    if not isinstance(check,dict) or check.get('criterion')!=criterion or not check.get('path') or not check.get('hash'):raise Error('ACCEPTANCE_REQUIRED','Invalid verification evidence')
+                self.verification_shape(checks,acceptance)
+                for check in checks:
+                    if not check.get('path'):continue
                     self.w.allowed(check['path'],j['scope'],drafts=True)
                     if digest(self.w.path(check['path']))!=check['hash']:raise Error('CONFLICT','Verification evidence changed')
+                delivered={a['hash'] for a in j['artifacts'] if a['purpose']=='deliverable' and a['status']=='approved'}
+                if delivered and not any(c.get('hash') in delivered for c in checks):
+                    raise Error('ACCEPTANCE_REQUIRED','Evidence must reference a published deliverable')
             j.update(patch)
             if new in ('completed','cancelled'):j['lease']={}
             j['revision']+=1;j['updated_at']=now()

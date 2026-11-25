@@ -16,7 +16,7 @@ def test_job_checkpoint_new_process(tmp_path):
     with pytest.raises(Error) as e:service.checkpoint(j['job_id'],1,{})
     assert e.value.code=='CONFLICT'
     j=service.checkpoint(j['job_id'],2,{'status':'review'})
-    j=service.checkpoint(j['job_id'],3,{'status':'completed'})
+    j=service.checkpoint(j['job_id'],3,{'status':'completed','verification':[dict(criterion='有出处')]})
     with pytest.raises(Error):service.checkpoint(j['job_id'],4,{'status':'in_progress'})
 
 def _job_with_scope(w):
@@ -36,7 +36,7 @@ def test_completion_blocked_while_draft_not_promoted(tmp_path):
     with pytest.raises(Error) as e:_step(s,w,j['job_id'],{'status':'completed'})
     assert e.value.code=='DELIVERABLE_REQUIRED'
     s.call('publish_file',dict(jid=j['job_id'],project_id=p['project_id'],source=draft['path'],source_hash=draft['hash'],name='方案_v1.0.md',confirm=True))
-    done=_step(s,w,j['job_id'],{'status':'completed'})
+    done=_step(s,w,j['job_id'],{'status':'completed','verification':[dict(criterion='有出处',path=draft['path'],hash=draft['hash'])]})
     assert done['status']=='completed' and (tmp_path/p['path']/'成果'/j['directory_name']/'方案_v1.0.md').exists()
 
 def test_process_material_or_no_file_needs_no_deliverable(tmp_path):
@@ -45,7 +45,7 @@ def test_process_material_or_no_file_needs_no_deliverable(tmp_path):
     _step(s,w,j['job_id'],{'status':'in_progress'})
     s.call('write_work_file',dict(jid=j['job_id'],project_id=p['project_id'],name='证据.json',content='{}',kind='process'))
     _step(s,w,j['job_id'],{'status':'review'})
-    done=_step(s,w,j['job_id'],{'status':'completed'})
+    done=_step(s,w,j['job_id'],{'status':'completed','verification':[dict(criterion='有出处')]})
     assert done['status']=='completed'
 
 def test_empty_draft_folder_needs_no_deliverable(tmp_path):
@@ -54,4 +54,4 @@ def test_empty_draft_folder_needs_no_deliverable(tmp_path):
     s=Service(tmp_path)
     _step(s,w,j['job_id'],{'status':'in_progress'})
     _step(s,w,j['job_id'],{'status':'review'})
-    assert _step(s,w,j['job_id'],{'status':'completed'})['status']=='completed'
+    assert _step(s,w,j['job_id'],{'status':'completed','verification':[dict(criterion='有出处')]})['status']=='completed'
