@@ -12,4 +12,4 @@ if [ ! -x engine/.venv/bin/python ]; then
 fi
 
 engine/.venv/bin/python -m pytest --version >/dev/null
-echo "Development contract ready. Read AGENTS.md; run 'make check' before pushing."
+echo "Hooks installed. Read CONTRIBUTING.md; run 'make check' before pushing."

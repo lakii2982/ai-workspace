@@ -49,4 +49,4 @@ macOS 在下载并解压的 core 中双击 `engine/setup-desktop.command`，选�
 
 ## 参与开发
 
-仓库的开发契约是 [AGENTS.md](AGENTS.md)，摘要见 [CONTRIBUTING.md](CONTRIBUTING.md)。克隆后执行一次 `make bootstrap`，提交前运行 `make check`。发布由 `.github/workflows/release.yml` 每周自动完成，紧急情况可手动触发该工作流。
+仓库的协作约定见 [CONTRIBUTING.md](CONTRIBUTING.md)。克隆后执行一次 `make bootstrap`，提交前运行 `make check`。发布由 `.github/workflows/release.yml` 每周自动完成，紧急情况可手动触发该工作流。

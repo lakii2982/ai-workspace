@@ -2,8 +2,6 @@
 !/.gitignore
 !/LICENSE
 !/README.md
-!/AGENTS.md
-!/CLAUDE.md
 !/CONTRIBUTING.md
 !/Makefile
 !/.githooks/

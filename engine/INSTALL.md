@@ -28,7 +28,7 @@ make bootstrap   # 每个克隆执行一次
 make check       # lint + 全量测试
 ```
 
-改动涉及安装、升级或桌面打包时，额外运行 `make verify-install`。分支、提交和发布规则见仓库根目录 `AGENTS.md`。
+改动涉及安装、升级或桌面打包时，额外运行 `make verify-install`。分支、提交和发布规则见 `CONTRIBUTING.md`。
 
 ## 旧版升级
 
