@@ -116,7 +116,11 @@ class Retrieval:
 
         seen=set(); replacements=[]; status_updates=[]; failures=[]; changed=0
         for rel,version,local in candidates:
-            if any(x.startswith('.') or x.startswith('~$') for x in Path(rel).parts) or '工作' in Path(rel).parts:continue
+            parts=Path(rel).parts
+            # Memory is recalled through its own index and is never source evidence.
+            if (any(x.startswith('.') or x.startswith('~$') for x in parts)
+                    or '工作' in parts or '记忆' in parts):
+                continue
             seen.add(rel)
             before=cached.get(rel)
             rows=[];status=None;code=None

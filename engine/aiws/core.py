@@ -145,10 +145,12 @@ class Workspace:
             target = self.path('项目/'+pid+'_'+name)
             if target.exists():raise Error('CONFLICT','Project directory already exists')
             target.mkdir()
-            for sub in ['资料','工作','成果','记忆']: (target/sub).mkdir()
+            for sub in ['资料','工作','成果','记忆','记忆/条目']: (target/sub).mkdir()
             data = {'schema_version':1,'project_id':pid,'name':name,'aliases':[],'status':'active'}
             put_json(target/'.project.json',data)
             atomic(target/'记忆/TIMELINE.md',f'# {name} 时间线\n\n项目编号：{pid}\n'.encode())
+            from .memories import Memories
+            atomic(target/'记忆/MEMORY.md',Memories.index_text(data,[]).encode())
             atomic(target/'PROJECT.md',f'# {name}\n\n项目编号：{pid}\n\n## 背景\n待补充\n\n## 目标\n待补充\n\n## 范围\n本项目资料与成果\n\n## 关键角色\n本地用户：确认与验收\n\n## 当前里程碑\n已立项\n\n## 有效决策\n暂无\n\n## 待确认事项\n暂无\n\n## 权威资料目录\n资料/\n'.encode())
         from .remote_store import enabled, RemoteStore
         if enabled(self):RemoteStore(self).write('projects',pid,{**data,'path':target.relative_to(self.root).as_posix()})

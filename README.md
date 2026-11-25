@@ -35,6 +35,10 @@ Claude Code 用 `--agent claude`。其他有终端能力的 Agent 用 `--agent c
 - [CLI / MCP 接口和数据契约](engine/INTERFACE_SPEC.md)
 - [MIT 许可证](LICENSE)
 
+## 项目记忆
+
+每个项目有自己的 `记忆/` 目录：`MEMORY.md` 是索引，`条目/` 下一条记忆一个 Markdown 文件，分为 user、feedback、project、reference 四类，条目之间可用 `[[名称]]` 互链。Agent 开始任务时从 `prepare_work_context` 取得索引，只读取相关条目；用 MCP 工具 `list_memory_notes`、`read_memory_note`、`save_memory_note`、`delete_memory_note` 维护，更新和删除都校验 hash。索引由核心根据文件生成。
+
 ## 员工桌面版
 
 macOS 在下载并解压的 core 中双击 `engine/setup-desktop.command`，选择桌面 Agent 和工作空间。已有安装可追加客户端。安装结果中的 `mcp: verified` 表示服务自检通过。支持 MCP 的桌面端在新会话调用 `verify_desktop_binding` 可以核对实际绑定的本地目录。
