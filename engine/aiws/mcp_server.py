@@ -97,7 +97,7 @@ def publish_file(jid:str,project_id:str,source:str,source_hash:str,name:str,expe
 def append_timeline(project_id:str,event_id:str,event_date:str,record_date:str,kind:str,summary:str,status:str,impact:str,owner:str,next_action:str,sources:list[str],expected_hash:str|None=None,memory:dict|None=None)->dict:
     return invoke('append_timeline',dict(project_id=project_id,event_id=event_id,event_date=event_date,record_date=record_date,kind=kind,summary=summary,status=status,impact=impact,owner=owner,next_action=next_action,sources=sources,expected_hash=expected_hash,memory=memory))
 
-@server.tool()
+@server.tool(annotations=ToolAnnotations(readOnlyHint=True, destructiveHint=False))
 def get_project(project_id:str)->dict:
     return invoke('get_project',dict(project_id=project_id))
 
@@ -115,16 +115,16 @@ def initialize_project_git(project_id:str)->dict:
     """Enable project-local Git snapshots without changing the framework repository."""
     return invoke('initialize_project_git',dict(project_id=project_id))
 
-@server.tool()
+@server.tool(annotations=ToolAnnotations(readOnlyHint=True, destructiveHint=False))
 def get_project_overview(project_id:str,detail:str='brief')->dict:
     return invoke('get_project_overview',dict(project_id=project_id,detail=detail))
 
-@server.tool()
+@server.tool(annotations=ToolAnnotations(readOnlyHint=True, destructiveHint=False))
 def list_project_memory(project_id:str,query:str='',categories:list[str]|None=None,view:str='current',limit:int=20,offset:int=0)->dict:
     """Find current project decisions and reasons before choosing or changing an approach."""
     return invoke('list_project_memory',dict(project_id=project_id,query=query,categories=categories,view=view,limit=limit,offset=offset))
 
-@server.tool()
+@server.tool(annotations=ToolAnnotations(readOnlyHint=True, destructiveHint=False))
 def read_project_memory(project_id:str,event_id:str,include_history:bool=True)->dict:
     return invoke('read_project_memory',dict(project_id=project_id,event_id=event_id,include_history=include_history))
 

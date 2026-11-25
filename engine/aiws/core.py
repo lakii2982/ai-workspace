@@ -103,8 +103,6 @@ class Workspace:
                 raise Error('DUPLICATE_PROJECT','Invalid or duplicate project identity')
             seen.add(pid)
             result.append({**data,'path':meta.parent.relative_to(self.root).as_posix()})
-        with self.lock('registry'):
-            put_json(self.path('.workspace/registry/projects.json'),{'schema_version':1,'projects':result})
         self._projects_cache=result
         return result
 
