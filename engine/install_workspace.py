@@ -20,6 +20,9 @@ PREVIOUS_RULES = {
     '9b505413a1100adece787c914105c6b1333e41a9676bf25af449e8923ec1dbca',
     'e15002aa8e8f547820d42f1d2ae2bf53a94986cecdcc28e7819dbdfce883a9a7',
     'd3e48aa4c2b5a8c8a2b9a33336d433ea3aa7b914375cec66fe9c03b50ffedf12',
+    '9d774687bddf22119bd79c0f6c25a190dab1e9939559799cb8d158813c3ae65c',
+    '296512125e5d83b55163c9e35ccc3b232f5c60b2ed791f050a2efde37fdc23e3',
+    'd019da8eaf65054ad14618816bd163a1dbdb3a54578555408e59b022d6a60a39',
 }
 
 
@@ -118,7 +121,7 @@ def install(workspace: Path, agent: str) -> None:
             launcher = legacy / "aiws"
 
     documents = [
-        (workspace / "AGENTS.md", (source / "AGENTS.md").read_text(encoding="utf-8")),
+        (workspace / "AGENTS.md", (source / "engine/workspace_rules.md").read_text(encoding="utf-8")),
         (workspace / "START.md", (source / "WORKSPACE.md").read_text(encoding="utf-8")),
     ]
     if "claude" in agent.split(","):

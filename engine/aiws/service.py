@@ -22,7 +22,8 @@ _JOB_WRITES = {
     'save_scenario', 'apply_scenario', 'save_work_checkpoint', 'save_artifact', 'write_work_file',
     'publish_file', 'move_work_file', 'delete_work_file',
 }
-_PROJECT_OPERATIONS = {'get_project', 'update_project', 'append_timeline', 'initialize_project_git'}
+_PROJECT_OPERATIONS = {'get_project', 'update_project', 'append_timeline', 'initialize_project_git',
+                       'save_memory_note', 'delete_memory_note'}
 
 class Service:
     def __init__(self,root):self.w=Workspace(root)
@@ -66,12 +67,16 @@ class Service:
         desktop = Scenarios(w)
         from .projects import Projects
         projects=Projects(w)
+        from .memories import Memories
+        memories=Memories(w)
         from .context import Context
         from .git_store import GitStore
+        from .feedback import Feedback
         context=Context(w)
         jobs=Jobs(w)
         retrieval=Retrieval(w)
         timeline=Timeline(w)
+        feedback=Feedback(w)
 
         def resume(jid,detail='brief'):
             jobs.file(jid)  # Validate identity before using it as a lock key.
@@ -104,13 +109,15 @@ class Service:
 
         extra={'prepare_work_context':prepare_context,'get_project_overview':context.overview,
                'list_project_memory':timeline.list_memory,'read_project_memory':timeline.read_memory,
+               'list_memory_notes':memories.list,'read_memory_note':memories.read,
+               'save_memory_note':memories.save,'delete_memory_note':memories.delete,
                'mark_context_read':context.mark_read,'save_work_checkpoint':context.save,
                'read_project_file':retrieval.read_project_file,'compare_project_file':retrieval.compare_project_file}
         if operation=='initialize_project_git':
             return GitStore(w,args['project_id']).initialize()
         if operation=='read_memory_version':
             return retrieval.read_project_file(args['project_id'],'记忆/TIMELINE.md',args['commit'])
-        methods={'get_project':projects.get,'update_project':projects.update,'write_work_file':files.write,'publish_file':files.publish,'move_work_file':files.move,'delete_work_file':files.delete,'job_directories':files.directories,'claim_job':flow.claim,'renew_claim':flow.renew,'release_job':flow.release,'resolve_job':flow.resolve,'bind_session':flow.bind,'resume_session':resume_session,'append_timeline':timeline.append,'list_projects':w.project_query,'create_project':w.project_create,'update_index':retrieval.update,'search_sources':retrieval.search,'read_source':retrieval.read,'create_job':jobs.create,'list_jobs':jobs.query,'list_jobs_full':jobs.list,'resume_job':resume,'checkpoint_job':jobs.checkpoint,'doctor':Maintenance(w).doctor}
+        methods={'get_project':projects.get,'update_project':projects.update,'write_work_file':files.write,'publish_file':files.publish,'move_work_file':files.move,'delete_work_file':files.delete,'job_directories':files.directories,'claim_job':flow.claim,'renew_claim':flow.renew,'release_job':flow.release,'resolve_job':flow.resolve,'bind_session':flow.bind,'resume_session':resume_session,'append_timeline':timeline.append,'list_projects':w.project_query,'create_project':w.project_create,'update_index':retrieval.update,'search_sources':retrieval.search,'read_source':retrieval.read,'create_job':jobs.create,'list_jobs':jobs.query,'list_jobs_full':jobs.list,'resume_job':resume,'checkpoint_job':jobs.checkpoint,'doctor':Maintenance(w).doctor,'report_issue':feedback.report_issue}
         methods.update(extra)
         for name in ('record_host_binding', 'list_host_bindings', 'request_publication', 'resolve_publication', 'list_decisions',
                      'checkout_draft', 'commit_draft', 'list_scenarios',

@@ -18,9 +18,13 @@ def test_real_stdio(tmp_path):
         async with stdio_client(params) as (read,write):
             async with ClientSession(read,write) as session:
                 await session.initialize()
-                tools=await session.list_tools();assert {'list_jobs','resume_job','save_artifact'} <= {t.name for t in tools.tools}
+                tools=await session.list_tools();assert {'list_jobs','resume_job','save_artifact','save_memory_note','list_memory_notes','report_issue'} <= {t.name for t in tools.tools}
                 result=await session.call_tool('list_projects',{})
                 assert not result.isError and 'PRJ-0001' in str(result)
+                noted=await session.call_tool('save_memory_note',{'project_id':'PRJ-0001','name':'report-style','description':'用户偏好要点式汇报','type':'user','content':'# 汇报偏好\n\n先给结论。'})
+                assert payload(noted)['ok']
+                notes=payload(await session.call_tool('list_memory_notes',{'project_id':'PRJ-0001'}))
+                assert notes['result']['items'][0]['name']=='report-style'
                 scope={'include_company':False,'include_professional':False,'project_ids':['PRJ-0001'],'topic_ids':[]}
                 job=await session.call_tool('create_job',{'title':'MCP task','goal':'Verify','scope':scope})
                 assert not job.isError and 'JOB-0001' in str(job)
@@ -49,4 +53,7 @@ def test_real_stdio(tmp_path):
                 assert saved_context['result']['context']['checkpoint_commit']
                 overview=payload(await session.call_tool('get_project_overview',{'project_id':'PRJ-0001'}))
                 assert overview['result']['total_tasks']==1
+                preview=payload(await session.call_tool('report_issue',{'title':'MCP 预览','details':'只预览不提交'}))
+                assert preview['ok'] and preview['result']['requires_confirmation'] is True
+                assert str(tmp_path) not in preview['result']['issue']['body']
     asyncio.run(run())

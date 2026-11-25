@@ -1,0 +1,11 @@
+#!/bin/sh
+# Reject direct pushes to the branches the release process owns.
+set -eu
+while read -r local_ref local_sha remote_ref remote_sha; do
+    case "$remote_ref" in
+        refs/heads/main|refs/heads/stable)
+            echo "Refusing direct push to $remote_ref. Open a pull request instead (see AGENTS.md)." >&2
+            exit 1
+            ;;
+    esac
+done

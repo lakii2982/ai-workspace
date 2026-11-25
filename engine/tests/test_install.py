@@ -14,7 +14,7 @@ def test_install_keeps_core_and_workspace_separate(tmp_path):
     core = root / "aiws_core"
     runtime = core / "engine" / ".venv" / "bin"
     runtime.mkdir(parents=True)
-    for path in ("aiws", "install.sh", "AGENTS.md", "WORKSPACE.md", "engine/install_workspace.py", "engine/desktop_install.py", "engine/upgrade.py"):
+    for path in ("aiws", "install.sh", "WORKSPACE.md", "engine/workspace_rules.md", "engine/install_workspace.py", "engine/desktop_install.py", "engine/upgrade.py"):
         shutil.copy2(checkout / path, core / path)
 
     # Reuse the test interpreter while exercising the real installer and launchers.
@@ -61,6 +61,8 @@ def test_install_keeps_core_and_workspace_separate(tmp_path):
     assert tomllib.loads(root_config.read_text())["mcp_servers"]["aiws"] == {**registered, "tools": approvals}
     skill = (default / "plugins" / "aiws" / "skills" / "aiws" / "SKILL.md").read_text()
     assert "AIWS 项目、任务和资料操作统一通过 MCP" in skill
+    assert "记忆/条目/" in skill
+    assert "记忆/条目/" in (default / "AGENTS.md").read_text()
     assert not (default / "aiws").exists()
     assert not (core / ".workspace").exists()
 

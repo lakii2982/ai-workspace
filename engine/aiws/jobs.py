@@ -99,7 +99,6 @@ class Jobs:
         with self.w.lock('jobs-create'):
             request_file=None
             if request_id is not None:
-                import json
                 if not isinstance(request_id,str) or not request_id:raise Error('INVALID_ARGUMENT','Invalid request ID')
                 payload=dict(title=title,goal=goal,scope=scope,acceptance=acceptance or [],agent=agent)
                 request_file=self.w.path('.workspace/create-requests/'+hashlib.sha256(request_id.encode()).hexdigest()+'.json')

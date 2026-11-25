@@ -20,12 +20,19 @@ class Maintenance:
         from .timeline import Timeline
         unstructured={p['project_id']:Timeline(self.w).unstructured_count(p['project_id']) for p in projects}
         unstructured={k:v for k,v in unstructured.items() if v}
+        from .memories import Memories
+        memory_review={}
+        for p in projects:
+            notes=Memories(self.w).overview(p['project_id'])
+            if notes.get('warnings') or notes.get('index_drift'):
+                memory_review[p['project_id']]={k:notes[k] for k in ('warnings','index_drift')
+                                                if k in notes}
         return {'healthy':integrity=='ok' and not bad and not issues,'sqlite':integrity,'projects':len(projects),
-                'jobs':len(jobs),'changed_artifacts':bad,'issues':issues,'timeline_unstructured':unstructured}
+                'jobs':len(jobs),'changed_artifacts':bad,'issues':issues,
+                'timeline_unstructured':unstructured,'memory_review':memory_review}
     def backup(self):
         # All mutating services take the shared workspace gate; backup takes exclusive gate.
         import fcntl
-        from .core import atomic
         with self.w.lock('backup'):
             gate=self.w.path('.workspace/gate.lock');gate.touch(exist_ok=True)
             with gate.open('r') as lock:

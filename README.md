@@ -35,6 +35,10 @@ Claude Code 用 `--agent claude`。其他有终端能力的 Agent 用 `--agent c
 - [CLI / MCP 接口和数据契约](engine/INTERFACE_SPEC.md)
 - [MIT 许可证](LICENSE)
 
+## 项目记忆
+
+每个项目有自己的 `记忆/` 目录：`MEMORY.md` 是索引，`条目/` 下一条记忆一个 Markdown 文件，分为 user、feedback、project、reference 四类，条目之间可用 `[[名称]]` 互链。Agent 开始任务时从 `prepare_work_context` 取得索引，只读取相关条目；用 MCP 工具 `list_memory_notes`、`read_memory_note`、`save_memory_note`、`delete_memory_note` 维护，更新和删除都校验 hash。索引由核心根据文件生成。
+
 ## 员工桌面版
 
 macOS 在下载并解压的 core 中双击 `engine/setup-desktop.command`，选择桌面 Agent 和工作空间。已有安装可追加客户端。安装结果中的 `mcp: verified` 表示服务自检通过。支持 MCP 的桌面端在新会话调用 `verify_desktop_binding` 可以核对实际绑定的本地目录。
@@ -43,6 +47,14 @@ macOS 在下载并解压的 core 中双击 `engine/setup-desktop.command`，选�
 - Claude Desktop 使用安装器打开的 MCPB 扩展。Claude Code 仍使用原有的 `--agent claude` 入口。
 - WorkBuddy 通过自定义 MCP 接入。DeepSeek Harness 使用 desktop profile 的本地工具插件。豆包办公使用安装器生成的技能 ZIP 和本机 CLI，在桌面端“技能 → 添加 → 上传技能”导入。
 - 对已有 Office 主稿发起续写时，先领取工作副本。正式发布先发起版本确认。在已完成任务中说“把这次做法存下来”可创建个人场景，其他客户端按相同版本复用。
-- 启用员工版启动器后，可对 Agent 说“升级 AIWS”，或由 Agent 执行 `aiws upgrade`。升级使用仓库 main 的固定提交，在已校验的备份副本上试运行，随后切换程序入口。新版本须支持当前工作空间格式。升级之后重开桌面会话以刷新工具清单。需要钉住已评审的提交时，设置 `AIWS_UPGRADE_SHA=<40 位提交>`；升级日志同时记录发布包的 SHA-256。
+- 启用员工版启动器后，可对 Agent 说“升级 AIWS”，或由 Agent 执行 `aiws upgrade`。默认从 `stable` 通道（最近一次发布）取固定提交；设置 `AIWS_CHANNEL=preview` 时改用 `main` 的最新提交，设置 `AIWS_UPGRADE_SHA=<40 位提交>` 可钉住已评审的提交。升级在已校验的备份副本上试运行，随后切换程序入口，升级日志同时记录发布包的 SHA-256。新版本须支持当前工作空间格式。升级之后重开桌面会话以刷新工具清单。
 
 五端的真机重启和重复授权验收见 GitHub Issue #8。Windows 原生桌面安装尚待适配。
+
+## 问题反馈
+
+使用中遇到工具报错、入口不可用、文档与实际不符，或某个场景因框架限制做不下去时，Agent 会先处理手头的工作，再询问是否要把问题提交给本仓库。同意后 Agent 先展示标题和正文，再调用 `report_issue` 提交；本机安装并登录 GitHub CLI 时直接创建 Issue，否则返回预填好的新建 Issue 链接。报告只包含问题现象、复现步骤和框架版本、系统版本、Python 版本、客户端名称，不含项目名称、文件路径、文件正文或客户资料，同时保存在工作空间的 `.workspace/feedback/reports/`。详见 [日常工作流程](engine/USER_GUIDE.md#问题反馈)。
+
+## 参与开发
+
+仓库的开发契约是 [AGENTS.md](AGENTS.md)，摘要见 [CONTRIBUTING.md](CONTRIBUTING.md)。克隆后执行一次 `make bootstrap`，提交前运行 `make check`。发布由 `.github/workflows/release.yml` 每周自动完成，紧急情况可手动触发该工作流。

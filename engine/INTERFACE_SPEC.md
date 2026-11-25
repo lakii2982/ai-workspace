@@ -14,6 +14,18 @@
 - save_work_checkpoint(jid,revision,context_patch?,patch?,lease_token?)：创建快照后更新任务；在此之前业务文件与记忆已保存。context包含working_on/resume_note/working_files/memory_refs/reviewed_files/base_commit/checkpoint_commit/checkpoint_ref，可缺省。
 - Git快照保存refs/aiws/observations及checkpoints；不改HEAD/分支/真实index。文件变更以Git blob为版本；旧manifest和受控发布校验不因此删除。
 
+## 项目记忆条目（Claude 风格）
+
+每个项目在 `记忆/` 下同时保存两类记忆：`TIMELINE.md` 是只追加的任务事件（上一节的 timeline memory），`MEMORY.md` 与 `条目/` 是长期事实。条目一条记忆一个 Markdown 文件，frontmatter 为 `name`、`description`、`metadata.type`（user/feedback/project/reference，可附 `created`、`updated`、`source`），正文用 `[[名称]]` 互链。文件是权威，`MEMORY.md` 由核心根据文件重建；手工改动索引会在 `index_drift` 中报告，下一次写入时修复。
+
+- list_memory_notes(project_id,query='',types=None,detail='index'|'full',limit=20,offset=0)：返回索引文本、按名称/标题/描述/正文匹配的条目、类型计数、`needs_review` 清单、断链和索引漂移。detail=full 附带正文；分页上限 100。
+- read_memory_note(project_id,name)：返回单条正文、链接解析、反向链接与当前 hash，供更新或删除前读取。
+- save_memory_note(project_id,name,description,type,content,source=None,expected_hash=None)：新建或更新。已存在的条目必须带当前 hash，否则 `CONFLICT`；`name` 为小写字母、数字、短横线或中文的 slug（≤64）；`description` 单行（≤200）；`content` ≤20000 字符；feedback 与 project 正文必须包含 `**Why:**` 与 `**How to apply:**`。相同内容重试返回 `replayed=true`。
+- delete_memory_note(project_id,name,expected_hash=None)：hash 必须匹配当前文件；删除后重建索引，并返回仍指向它的 `backlinks`。
+- 分工：时间线保存带 sources、日期、责任人和后续的事件与 supersede 演进，默认只返回当前有效结论；记忆条目保存跨任务仍成立的当前真相。决定先写时间线，影响以后工作时再蒸馏为记忆条目，`source` 约定为 `event:<事件ID>`（不校验事件是否存在，便于先写条目后补事件）；同一事实不重复叙述。
+- prepare_work_context 的 `memory_notes`（索引与条目描述）和 get_project_overview 的 `memory_notes` 用于接续时加载记忆；时间线记忆仍是 `memory`/`memory_digest`，两者独立维护。
+- `记忆/` 不进入检索索引：记忆是上下文，不是来源证据。需要作为证据的事实应回读原件并记录指纹。
+
 所有入口共享 Service。CLI 成功返回 `ok=true` 和 `result`，失败返回 `ok=false` 和 `error`，退出码为 1。`aiws_core/aiws` 默认定位同级 `Workspace/`，可用 `--workspace` 或 `AIWS_WORKSPACE` 显式定位。CLI 默认输出 JSON。
 
 基础命令：init；project list/create --name；index update；search --query --project（可重复）--company --professional；source read；job create/list/resume/checkpoint；artifact save；backup；restore；doctor。非快捷参数以 --params JSON 传入。通用 `call 操作名 --params JSON` 与 MCP 对应同名业务操作。
@@ -74,3 +86,12 @@ DELIVERABLE_REQUIRED：任务转completed时，若 工作/JOB/工作稿/ 仍有�
 - `request_publication(jid,project_id,name,target_name,reason,lease_token?)` 生成绑定源和目标版本的决定事项。`list_decisions(project_id,jid?,state?,limit?,offset?)` 可分页。用户审阅后 `resolve_publication(jid,project_id,decision_id,approve,source_hash,note?,lease_token?)` 处理指定版本。被新版替换的源稿确认时标为 superseded。
 - `save_scenario(jid,title,instructions,reason,confirmed?,expected_version?,scenario_id?,lease_token?)` 保存已泛化的模板、步骤和验收示例。更新时携带原版本及长期修改确认。`list_scenarios` 和 `read_scenario` 用于检索或读取旧版。`apply_scenario(jid,scenario_id,version?,lease_token?)` 将版本固定到任务。任务接续返回 scenarios 与 publication_decisions。
 - MCP 的 `verify_desktop_binding` 读取当前握手中的客户端名称和版本；CLI `call list_host_bindings` 可查看历史连接。首次连接记录不代表重启或弹窗测试已通过。
+
+## 框架问题反馈
+
+- `report_issue(title, details, steps?, expected?, component?, confirm=false, include_environment=true, client?)`：用户同意后把框架自身的问题提交到上游仓库。`confirm=false` 只返回 `requires_confirmation`、`repository`、`issue`（标题与正文）和 `submission`，不写文件、不联网；Agent 把标题和正文展示给用户，用户同意后再带 `confirm=true` 调用。
+- 提交方式：本机 `gh` 已安装并通过 `gh auth status` 时执行 `gh issue create --repo <仓库> --title <标题> --body-file -`，返回 `status=submitted` 和 Issue `url`；否则返回 `status=manual` 和预填好的新建 Issue 链接，由用户点开提交。`gh` 提交失败同样降级为链接，并在 `submission.error` 记录异常类型。
+- 提交记录写入 `.workspace/feedback/reports/<报告ID>.json`，并附一份同名 `.md`；记录 `status`、`url`、`fingerprint` 与完整正文。相同标题和正文已经成功提交时返回原结果并带 `replayed=true`，不重复创建。
+- 正文环境块只含框架版本、系统版本、Python 版本、工作空间格式、提交时间和客户端名称；不含工作空间路径、项目名称、文件名或文件内容。`include_environment=false` 可省略整个环境块。
+- 默认仓库为 `lakii2982/ai-workspace`，可用环境变量 `AIWS_ISSUE_REPO=owner/name` 覆盖（用于开发实例或镜像）。
+- 参数上限：`title` 120 字符、`details` 8000、`expected` 2000、`component` 200、`steps` 20 条且每条 500；`title` 会折叠为单行。

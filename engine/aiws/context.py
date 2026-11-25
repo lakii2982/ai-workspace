@@ -3,6 +3,7 @@ from collections import Counter
 import re
 from .core import Error, now
 from .jobs import Jobs
+from .memories import Memories
 
 
 class Context:
@@ -70,8 +71,18 @@ class Context:
                 omitted[key] = max(0, len(sections[key])-limit)
                 sections[key] = sections[key][:limit]
         memory = self.memories(project_id) if detail=='full' else Timeline(self.w).list_memory(project_id, limit=20)
+        notes = Memories(self.w).overview(project_id, 'full' if detail=='full' else 'index')
+        notes_summary = {k: notes[k] for k in ('total', 'index_path')}
+        for key in ('counts', 'warnings', 'index_drift', 'expand', 'omitted'):
+            if key in notes:
+                notes_summary[key] = notes[key]
+        if detail == 'full':
+            notes_summary['items'] = notes['items']
+            if 'index_text' in notes:
+                notes_summary['index_text'] = notes['index_text']
         return dict(project={k: p.get(k) for k in ('project_id','name','goal','status','status_note','path')},
                     counts=counts, total_tasks=len(jobs), **sections, memory_digest=self.memory_view(memory,detail),
+                    memory_notes=notes_summary,
                     coverage=dict(computed_at=now(), omitted=omitted,
                                   task_revisions={j['job_id']:j['revision'] for j in jobs}),
                     expand=dict(operation='get_project_overview', project_id=project_id, detail='full'))
@@ -170,7 +181,8 @@ class Context:
             stale = {r['path'] for r in changed_reviewed}
             for path in observation['files']:
                 # Metadata is available through dedicated context/memory sections.
-                if not visible(path) or path.startswith('.') or path in ('PROJECT.md','记忆/TIMELINE.md'):
+                if (not visible(path) or path.startswith(('.', '记忆/'))
+                        or path == 'PROJECT.md'):
                     continue
                 if path not in reviewed or path in stale:
                     queue.append(dict(path=path, observation_commit=observation['commit'],
@@ -228,6 +240,7 @@ class Context:
                     primary_draft=draft, changed_reviewed_files=changed_reviewed,
                     index=index_report,
                     git_changes=changes, memory=self.memory_view(memory,detail), memory_references=references,
+                    memory_notes=Memories(self.w).overview(project_id, 'full' if detail=='full' else 'index'),
                     related_memory=self.memory_view(related,detail) if related else None,
                     reading_queue=queue[:20] if detail=='brief' else queue,
                     coverage=coverage,

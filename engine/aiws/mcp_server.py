@@ -1,14 +1,17 @@
 import os
 from mcp.server.fastmcp import FastMCP, Context
 from mcp.types import ToolAnnotations
-from .service import Service
-from .core import Error
 
 server=FastMCP('AI WorkSpace', instructions=(
     'Use the bound project and resume the task. Edit Office files with checkout_draft and '
     'commit_draft. Ask the user about a specific version before resolve_publication. '
     'Generalize a completed task into reusable variables and steps with save_scenario. '
-    'Use apply_scenario to pin the revision. Permanent changes require user confirmation.'
+    'Use apply_scenario to pin the revision. Permanent changes require user confirmation. '
+    'prepare_work_context returns the project memory index: read only the notes whose '
+    'description matters, and keep durable facts current with save_memory_note. '
+    'When an AIWS tool fails unexpectedly or a scenario is blocked by the framework, '
+    'ask the user once whether to report it; only after they agree call report_issue '
+    'with confirm=true.'
 ))
 READ_OPERATIONS = {
     'list_projects', 'get_project', 'get_project_overview', 'list_jobs', 'list_jobs_full',
@@ -168,6 +171,26 @@ def list_project_memory(project_id:str,query:str='',categories:list[str]|None=No
 def read_project_memory(project_id:str,event_id:str,include_history:bool=True)->dict:
     return invoke('read_project_memory',dict(project_id=project_id,event_id=event_id,include_history=include_history))
 
+@server.tool(annotations=ToolAnnotations(readOnlyHint=True, destructiveHint=False))
+def list_memory_notes(project_id:str,query:str='',types:list[str]|None=None,detail:str='index',limit:int=20,offset:int=0)->dict:
+    """Recall durable project memories from their index; read only the notes whose description matters."""
+    return invoke('list_memory_notes',dict(project_id=project_id,query=query,types=types,detail=detail,limit=limit,offset=offset))
+
+@server.tool(annotations=ToolAnnotations(readOnlyHint=True, destructiveHint=False))
+def read_memory_note(project_id:str,name:str)->dict:
+    """Read one memory note with its links, backlinks and current hash."""
+    return invoke('read_memory_note',dict(project_id=project_id,name=name))
+
+@server.tool()
+def save_memory_note(project_id:str,name:str,description:str,type:str,content:str,source:str|None=None,expected_hash:str|None=None)->dict:
+    """Create or update one durable project memory; source may point at the timeline event it distills (event:<ID>). Pass expected_hash when the note exists."""
+    return invoke('save_memory_note',dict(project_id=project_id,name=name,description=description,type=type,content=content,source=source,expected_hash=expected_hash))
+
+@server.tool()
+def delete_memory_note(project_id:str,name:str,expected_hash:str|None=None)->dict:
+    """Delete a memory that is wrong or no longer true; expected_hash must match the current file."""
+    return invoke('delete_memory_note',dict(project_id=project_id,name=name,expected_hash=expected_hash))
+
 @server.tool()
 def read_project_file(project_id:str,path:str,commit:str|None=None)->dict:
     """Read actual current or observed file content, including unregistered project inputs and drafts."""
@@ -267,3 +290,16 @@ def verify_desktop_binding(ctx: Context) -> dict:
     """Verify this desktop session reaches its intended workspace. Report the workspace path to the user."""
     info = ctx.session.client_params.clientInfo
     return invoke("record_host_binding", {"client": info.name, "version": info.version})
+
+
+@server.tool(annotations=ToolAnnotations(destructiveHint=False, openWorldHint=True))
+def report_issue(title:str,details:str,steps:list[str]|None=None,expected:str='',component:str='',confirm:bool=False,include_environment:bool=True,ctx:Context=None)->dict:
+    """Report a framework problem to the upstream repository after the user agrees. Call once without confirm to preview the issue, show it to the user, then call again with confirm=true."""
+    client=''
+    if ctx is not None:
+        try:
+            info=ctx.session.client_params.clientInfo
+            client=f'{info.name} {info.version}'
+        except Exception:
+            client=''
+    return invoke('report_issue',dict(title=title,details=details,steps=steps,expected=expected,component=component,confirm=confirm,include_environment=include_environment,client=client))
