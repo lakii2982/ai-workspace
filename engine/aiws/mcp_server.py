@@ -10,17 +10,45 @@ server=FastMCP('AI WorkSpace', instructions=(
     'Generalize a completed task into reusable variables and steps with save_scenario. '
     'Use apply_scenario to pin the revision. Permanent changes require user confirmation.'
 ))
-def invoke(operation,args):
+READ_OPERATIONS = {
+    'list_projects', 'get_project', 'get_project_overview', 'list_jobs', 'list_jobs_full',
+    'resolve_job', 'list_project_memory', 'read_project_memory', 'read_scenario',
+    'list_scenarios', 'list_decisions', 'read_project_file', 'compare_project_file',
+    'search_sources', 'read_source', 'doctor', 'verify_desktop_binding',
+}
+OPERATION_TIMEOUTS = {'backup': 600, 'restore': 600, 'upgrade_core': 900}
+READ_TIMEOUT = 60
+WRITE_TIMEOUT = 180
+
+
+def timeout_for(operation):
+    if operation in OPERATION_TIMEOUTS:
+        return OPERATION_TIMEOUTS[operation]
+    return READ_TIMEOUT if operation in READ_OPERATIONS else WRITE_TIMEOUT
+
+
+def invoke(operation,args,timeout=None):
     # Fresh process shares current CLI code after upgrades; no long-lived stale writer.
     import json
     import subprocess
     import sys
+    workspace=os.environ.get('AIWS_WORKSPACE')
+    if not workspace:
+        return {'ok':False,'error':{'code':'ENTRY_UNAVAILABLE','message':'AIWS_WORKSPACE is not set'}}
+    limit=timeout or timeout_for(operation)
+    entry=[os.environ['AIWS_LAUNCHER']] if os.environ.get('AIWS_LAUNCHER') else [sys.executable,'-m','aiws']
     try:
-        entry = [os.environ['AIWS_LAUNCHER']] if os.environ.get('AIWS_LAUNCHER') else [sys.executable, '-m', 'aiws']
-        result=subprocess.run([*entry,'--workspace',os.environ['AIWS_WORKSPACE'],'call',operation,'--params',json.dumps(args,ensure_ascii=False)],capture_output=True,text=True,timeout=180)
-        return json.loads(result.stdout)
-    except (OSError,ValueError,subprocess.TimeoutExpired) as e:
+        result=subprocess.run([*entry,'--workspace',workspace,'call',operation,
+                               '--params',json.dumps(args,ensure_ascii=False)],
+                              capture_output=True,text=True,timeout=limit)
+    except subprocess.TimeoutExpired:
+        return {'ok':False,'error':{'code':'TIMEOUT','message':f'{operation} exceeded {limit}s; run doctor before retrying'}}
+    except OSError as e:
         return {'ok':False,'error':{'code':'ENTRY_UNAVAILABLE','message':type(e).__name__}}
+    try:
+        return json.loads(result.stdout)
+    except ValueError:
+        return {'ok':False,'error':{'code':'ENTRY_UNAVAILABLE','message':'Invalid response from the core'}}
 
 @server.tool(annotations=ToolAnnotations(readOnlyHint=True, destructiveHint=False))
 def list_projects(query:str='',limit:int=20,offset:int=0)->dict:
@@ -228,7 +256,7 @@ def upgrade_core()->dict:
     launcher = os.environ.get('AIWS_LAUNCHER')
     if not launcher:
         return {'ok': False, 'error': {'code': 'ENTRY_UNAVAILABLE', 'message': 'Start MCP through aiws --mcp'}}
-    result = subprocess.run([launcher, 'upgrade'], capture_output=True, text=True)
+    result = subprocess.run([launcher, 'upgrade'], capture_output=True, text=True, timeout=900)
     try:
         return json.loads(result.stdout)
     except ValueError:

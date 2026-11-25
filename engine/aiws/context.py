@@ -267,8 +267,9 @@ class Context:
         git=GitStore(self.w,j['scope']['project_ids'][0])
         ctx=dict(j.get('context',{}))
         reviewed={r['path']:r for r in ctx.get('reviewed_files',[])}
+        observed=git.file_oids(observation_commit)
         for path in paths:
-            if git.file_oid(observation_commit,path) is None:
+            if observed.get(path) is None:
                 raise Error('NOT_FOUND','Read path is absent from observation')
             reviewed[path]=dict(path=path,observation_commit=observation_commit)
         ctx['reviewed_files']=list(reviewed.values())
