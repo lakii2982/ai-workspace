@@ -51,6 +51,10 @@ macOS 在下载并解压的 core 中双击 `engine/setup-desktop.command`，选�
 
 五端的真机重启和重复授权验收见 GitHub Issue #8。Windows 原生桌面安装尚待适配。
 
+## 问题反馈
+
+使用中遇到工具报错、入口不可用、文档与实际不符，或某个场景因框架限制做不下去时，Agent 会先处理手头的工作，再询问是否要把问题提交给本仓库。同意后 Agent 先展示标题和正文，再调用 `report_issue` 提交；本机安装并登录 GitHub CLI 时直接创建 Issue，否则返回预填好的新建 Issue 链接。报告只包含问题现象、复现步骤和框架版本、系统版本、Python 版本、客户端名称，不含项目名称、文件路径、文件正文或客户资料，同时保存在工作空间的 `.workspace/feedback/reports/`。详见 [日常工作流程](engine/USER_GUIDE.md#问题反馈)。
+
 ## 参与开发
 
 仓库的开发契约是 [AGENTS.md](AGENTS.md)，摘要见 [CONTRIBUTING.md](CONTRIBUTING.md)。克隆后执行一次 `make bootstrap`，提交前运行 `make check`。发布由 `.github/workflows/release.yml` 每周自动完成，紧急情况可手动触发该工作流。

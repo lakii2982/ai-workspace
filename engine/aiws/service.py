@@ -73,10 +73,12 @@ class Service:
         memories=Memories(w)
         from .context import Context
         from .git_store import GitStore
+        from .feedback import Feedback
         context=Context(w)
         jobs=Jobs(w)
         retrieval=Retrieval(w)
         timeline=Timeline(w)
+        feedback=Feedback(w)
 
         def resume(jid,detail='brief'):
             jobs.file(jid)  # Validate identity before using it as a lock key.
@@ -117,7 +119,7 @@ class Service:
             return GitStore(w,args['project_id']).initialize()
         if operation=='read_memory_version':
             return retrieval.read_project_file(args['project_id'],'记忆/TIMELINE.md',args['commit'])
-        methods={'get_project':projects.get,'update_project':projects.update,'write_work_file':files.write,'publish_file':files.publish,'job_directories':files.directories,'claim_job':flow.claim,'renew_claim':flow.renew,'release_job':flow.release,'resolve_job':flow.resolve,'bind_session':flow.bind,'resume_session':resume_session,'append_timeline':timeline.append,'list_projects':w.project_query,'create_project':w.project_create,'update_index':retrieval.update,'search_sources':retrieval.search,'read_source':retrieval.read,'create_job':jobs.create,'list_jobs':jobs.query,'list_jobs_full':jobs.list,'resume_job':resume,'checkpoint_job':jobs.checkpoint,'doctor':Maintenance(w).doctor}
+        methods={'get_project':projects.get,'update_project':projects.update,'write_work_file':files.write,'publish_file':files.publish,'job_directories':files.directories,'claim_job':flow.claim,'renew_claim':flow.renew,'release_job':flow.release,'resolve_job':flow.resolve,'bind_session':flow.bind,'resume_session':resume_session,'append_timeline':timeline.append,'list_projects':w.project_query,'create_project':w.project_create,'update_index':retrieval.update,'search_sources':retrieval.search,'read_source':retrieval.read,'create_job':jobs.create,'list_jobs':jobs.query,'list_jobs_full':jobs.list,'resume_job':resume,'checkpoint_job':jobs.checkpoint,'doctor':Maintenance(w).doctor,'report_issue':feedback.report_issue}
         methods.update(extra)
         for name in ('record_host_binding', 'list_host_bindings', 'request_publication', 'resolve_publication', 'list_decisions',
                      'checkout_draft', 'commit_draft', 'list_scenarios',
