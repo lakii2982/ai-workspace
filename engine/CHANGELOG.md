@@ -4,6 +4,8 @@
 
 ### 变更
 
+- 升级支持 `AIWS_UPGRADE_SHA=<40 位提交>` 钉住已评审版本；发布包校验 SHA-256 并限制条目数、单文件与解压总量。
+- `create_project` 返回值标注 Git 未启用并给出启用提示（默认行为不变）。
 - 完成任务时两种部署都要求 `verification`：每条验收条件一条证据，`criterion` 必须逐项匹配；`path`/`hash` 可留空（决策类任务），填写则必须成对并校验文件。
 - 任务有已发布成果时，至少一条证据必须指向该成果的内容。
 - `checkpoint_job` 不再接受 `artifacts`、`sources`：成果与来源只能由 `save_artifact` / `publish_file` 写入。

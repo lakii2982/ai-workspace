@@ -43,6 +43,6 @@ macOS 在下载并解压的 core 中双击 `engine/setup-desktop.command`，选�
 - Claude Desktop 使用安装器打开的 MCPB 扩展。Claude Code 仍使用原有的 `--agent claude` 入口。
 - WorkBuddy 通过自定义 MCP 接入。DeepSeek Harness 使用 desktop profile 的本地工具插件。豆包办公使用安装器生成的技能 ZIP 和本机 CLI，在桌面端“技能 → 添加 → 上传技能”导入。
 - 对已有 Office 主稿发起续写时，先领取工作副本。正式发布先发起版本确认。在已完成任务中说“把这次做法存下来”可创建个人场景，其他客户端按相同版本复用。
-- 启用员工版启动器后，可对 Agent 说“升级 AIWS”，或由 Agent 执行 `aiws upgrade`。升级使用仓库 main 的固定提交，在已校验的备份副本上试运行，随后切换程序入口。新版本须支持当前工作空间格式。升级之后重开桌面会话以刷新工具清单。
+- 启用员工版启动器后，可对 Agent 说“升级 AIWS”，或由 Agent 执行 `aiws upgrade`。升级使用仓库 main 的固定提交，在已校验的备份副本上试运行，随后切换程序入口。新版本须支持当前工作空间格式。升级之后重开桌面会话以刷新工具清单。需要钉住已评审的提交时，设置 `AIWS_UPGRADE_SHA=<40 位提交>`；升级日志同时记录发布包的 SHA-256。
 
 五端的真机重启和重复授权验收见 GitHub Issue #8。Windows 原生桌面安装尚待适配。

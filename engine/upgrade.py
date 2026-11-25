@@ -18,6 +18,11 @@ from aiws.core import atomic, put_json
 
 REPOSITORY = 'lakii2982/ai-workspace'
 SCHEMA = 'employee-additive-v1'
+# A release is a source tree, not a data dump. Refuse archives that would
+# exhaust the disk before anything is written outside the scratch directory.
+MAX_MEMBERS = 20000
+MAX_FILE_BYTES = 200 * 1024 * 1024
+MAX_TOTAL_BYTES = 2 * 1024 * 1024 * 1024
 
 
 def run(argv, env=None):
@@ -42,27 +47,52 @@ def current(root, state):
     return root / '.aiws-releases' / version
 
 
+def unpack(package, sha, destination):
+    """Extract a release archive with explicit size limits; returns the file count."""
+    members = package.getmembers()
+    if len(members) > MAX_MEMBERS:
+        raise ValueError(f'Release archive has too many entries ({len(members)})')
+    total, count = 0, 0
+    for item in members:
+        parts = Path(item.name).parts
+        if not parts or parts[0] != 'ai-workspace-' + sha or '..' in parts:
+            raise ValueError('Unexpected release archive path')
+        if item.isdir():
+            continue
+        if not item.isfile() or len(parts) < 2:
+            raise ValueError('Unexpected release archive entry')
+        if item.size > MAX_FILE_BYTES:
+            raise ValueError(f'Release entry too large: {item.name}')
+        total += item.size
+        if total > MAX_TOTAL_BYTES:
+            raise ValueError('Release archive expands beyond the size limit')
+        path = destination / Path(*parts[1:])
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with package.extractfile(item) as content, path.open('xb') as output:
+            shutil.copyfileobj(content, output)
+        path.chmod(0o755 if item.mode & 0o111 else 0o644)
+        count += 1
+    return count
+
+
 def get_archive(sha, archive):
     url = f'https://codeload.github.com/{REPOSITORY}/tar.gz/{sha}'
     with urlopen(url, timeout=90) as response, archive.open('wb') as output:
         shutil.copyfileobj(response, output)
+    checksum = hashlib.sha256(archive.read_bytes()).hexdigest()
     with tarfile.open(archive, 'r:gz') as package:
-        for item in package:
-            parts = Path(item.name).parts
-            if not parts or parts[0] != 'ai-workspace-' + sha or '..' in parts:
-                raise ValueError('Unexpected release archive path')
-            if item.isdir():
-                continue
-            if not item.isfile() or len(parts) < 2:
-                raise ValueError('Unexpected release archive entry')
-            path = archive.parent / 'source' / Path(*parts[1:])
-            path.parent.mkdir(parents=True, exist_ok=True)
-            with package.extractfile(item) as content, path.open('xb') as destination:
-                shutil.copyfileobj(content, destination)
-            path.chmod(0o755 if item.mode & 0o111 else 0o644)
+        unpack(package, sha, archive.parent / 'source')
+    return checksum
 
 
 def resolve_main():
+    # AIWS_UPGRADE_SHA pins an installation to a reviewed commit; the journal
+    # records the archive checksum either way.
+    pinned = os.environ.get('AIWS_UPGRADE_SHA')
+    if pinned:
+        if not re.fullmatch(r'[0-9a-f]{40}', pinned):
+            raise ValueError('AIWS_UPGRADE_SHA must be a 40-character commit ID')
+        return pinned
     req = Request(f'https://api.github.com/repos/{REPOSITORY}/commits/main',
                   headers={'User-Agent': 'aiws-local-upgrade'})
     with urlopen(req, timeout=20) as response:
@@ -81,7 +111,7 @@ def prepare(root, sha, scratch):
         ready = target / '.ready'
         if ready.is_file() and ready.read_text() == sha:
             return target
-        get_archive(sha, scratch / 'release.tar.gz')
+        checksum = get_archive(sha, scratch / 'release.tar.gz')
         source = scratch / 'source'
         if (source / 'engine/upgrade-schema.txt').read_text().strip() != SCHEMA:
             raise ValueError('Release requires a dedicated data migration')
@@ -94,6 +124,7 @@ def prepare(root, sha, scratch):
         shutil.copytree(source, target)
         run([target / 'install.sh', scratch / 'build-test', '--agent', 'cli'])
         atomic(ready, sha.encode())
+        atomic(target / '.archive-sha256', (checksum + '\n').encode())
         (target / '.building').unlink()
         return target
 
@@ -147,6 +178,10 @@ def upgrade(root, workspace, state):
             cli(previous, workspace, 'restore', '--params', json.dumps(dict(archive=backup['path'], destination=str(trial))))
             baseline = cli(previous, trial, 'doctor')
             candidate = prepare(root, sha, scratch)
+            archive = candidate / '.archive-sha256'
+            if archive.is_file():
+                record.update(archive_sha256=archive.read_text().strip())
+                put_json(journal, record)
             verify(candidate, trial, baseline)
             live = cli(previous, workspace, 'doctor')
             verify(candidate, workspace, live)
