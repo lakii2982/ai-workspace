@@ -12,7 +12,6 @@ from contextlib import nullcontext
 # pending rows across all projects. Exclude ordinary operations until complete.
 _EXCLUSIVE_OPERATIONS = {
     'create_project', 'migrate_feishu', 'rollback_feishu', 'reconcile_remote',
-    'feishu_stage_job',
 }
 # Serialize a same-task service transaction across its file check, Git snapshot
 # and checkpoint. Resume and contextual reads acquire this same guard after
@@ -53,13 +52,11 @@ class Service:
         if operation in ('migrate_feishu','rollback_feishu'):
             from .migration import Migration
             return (Migration(w).run if operation=='migrate_feishu' else Migration(w).rollback)(**args)
-        if operation in ('feishu_query','feishu_stage_job'):
+        if operation=='feishu_query':
             from .feishu import Feishu
-            remote=Feishu(w)
-            if operation=='feishu_query':
-                args=dict(args)
-                args.setdefault('projection',['项目ID','项目名称','状态'] if args.get('entity')=='projects' else ['任务ID','标题','所属项目ID','所属项目名称','状态','版本号'])
-            return (remote.rows if operation=='feishu_query' else remote.stage_job)(**args)
+            args=dict(args)
+            args.setdefault('projection',['项目ID','项目名称','状态'] if args.get('entity')=='projects' else ['任务ID','标题','所属项目ID','所属项目名称','状态','版本号'])
+            return Feishu(w).rows(**args)
         from .workflow import Workflow
         flow=Workflow(w)
         from .files import Files

@@ -1,0 +1,2 @@
+- 移除 `feishu_stage_job` 操作与 `Feishu.stage_job`，飞书适配仅保留只读的 `feishu_query`。
+- `migrate_feishu` 新增显式 `adopt_staging` 参数；删除 `JOB-0012` 硬编码特例，未显式指定的未托管远端行一律拒绝。
