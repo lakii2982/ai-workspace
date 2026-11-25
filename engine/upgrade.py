@@ -10,6 +10,7 @@ import subprocess
 import sys
 import tarfile
 import tempfile
+from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
 # Keep bootstrap dependencies in the original installation. A candidate never
@@ -62,14 +63,31 @@ def get_archive(sha, archive):
             path.chmod(0o755 if item.mode & 0o111 else 0o644)
 
 
-def resolve_main():
-    req = Request(f'https://api.github.com/repos/{REPOSITORY}/commits/main',
-                  headers={'User-Agent': 'aiws-local-upgrade'})
-    with urlopen(req, timeout=20) as response:
-        sha = json.load(response)['sha']
-    if not re.fullmatch(r'[0-9a-f]{40}', sha):
-        raise ValueError('Invalid release SHA')
-    return sha
+def resolve_channel(channel=None):
+    """Resolve the release channel to a commit SHA.
+
+    ``stable`` is the default and follows the published release branch.
+    ``preview`` follows main. Until the first release creates ``stable``,
+    the stable channel falls back to main so existing installs can upgrade.
+    """
+    channel = (channel or os.environ.get('AIWS_CHANNEL') or 'stable').strip()
+    if channel not in ('stable', 'preview'):
+        raise ValueError(f'Unknown upgrade channel: {channel}')
+    refs = ('stable', 'main') if channel == 'stable' else ('main',)
+    for ref in refs:
+        req = Request(f'https://api.github.com/repos/{REPOSITORY}/commits/{ref}',
+                      headers={'User-Agent': 'aiws-local-upgrade'})
+        try:
+            with urlopen(req, timeout=20) as response:
+                sha = json.load(response)['sha']
+        except HTTPError as error:
+            if error.code == 404:
+                continue
+            raise
+        if not re.fullmatch(r'[0-9a-f]{40}', sha):
+            raise ValueError('Invalid release SHA')
+        return sha, ref
+    raise ValueError('No release channel is available')
 
 
 def prepare(root, sha, scratch):
@@ -131,11 +149,11 @@ def upgrade(root, workspace, state):
         record.update(phase='recovered')
         put_json(journal, record)
         previous = current(root, state)
-    sha = resolve_main()
+    sha, channel = resolve_channel()
     if previous.name == sha:
-        return {'phase': 'current', 'version': sha}
+        return {'phase': 'current', 'version': sha, 'channel': channel}
     prior = None if previous == root else previous.name
-    record = dict(schema_version=1, phase='preparing', target=sha, previous=prior)
+    record = dict(schema_version=1, phase='preparing', target=sha, previous=prior, channel=channel)
     put_json(journal, record)
     try:
         backup = cli(previous, workspace, 'backup')

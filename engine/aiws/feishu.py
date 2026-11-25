@@ -5,7 +5,6 @@ One coordinator workspace only. Local flock is NOT a multi-host lock.
 import json
 import subprocess
 import tempfile
-import uuid
 from pathlib import Path
 from .core import Error, load, put_json
 

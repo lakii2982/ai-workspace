@@ -1,6 +1,7 @@
 """Initialize a data workspace and verify the core CLI and MCP service."""
 
 import asyncio
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -9,9 +10,17 @@ import subprocess
 import sys
 import tomllib
 
-from desktop_install import CLIENTS, codex_config, configure, config_json, detect
+from desktop_install import CLIENTS, codex_config, configure, config_json, detect, save
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
+
+# Fingerprints of the default rules shipped before AIWS became mandatory.
+PREVIOUS_RULES = {
+    '6a06c5f04f4ce42779e3dd4e813db281f1ce25667777c82dfdc466cd5fede42e',
+    '9b505413a1100adece787c914105c6b1333e41a9676bf25af449e8923ec1dbca',
+    'e15002aa8e8f547820d42f1d2ae2bf53a94986cecdcc28e7819dbdfce883a9a7',
+    'd3e48aa4c2b5a8c8a2b9a33336d433ea3aa7b914375cec66fe9c03b50ffedf12',
+}
 
 
 def check_file(path: Path, content: str) -> None:
@@ -54,9 +63,17 @@ def client_config(workspace: Path, launcher: Path, agent: str):
     if agent == "codex":
         path = workspace / ".codex" / "config.toml"
         old = tomllib.loads(path.read_text()).get("mcp_servers", {}).get("aiws") if path.exists() else None
-        legacy = dict(old or {})
-        legacy.pop("tools", None)
-        codex_config(path, server, uses_working_legacy_launcher(legacy, workspace))
+        legacy = {key: value for key, value in (old or {}).items()
+                  if key not in {"tools", "required"}}
+        config = codex_config(path, server, uses_working_legacy_launcher(legacy, workspace))
+        directories = [workspace]
+        if workspace == launcher.parent.parent / "Workspace":
+            root = workspace.parent
+            modes = {tool: options["approval_mode"] for tool, options in config.get("tools", {}).items()
+                     if "approval_mode" in options}
+            codex_config(root / ".codex" / "config.toml", server, tool_defaults=modes)
+            directories.append(root)
+        return directories
     elif agent == "claude":
         path = workspace / ".mcp.json"
         existing = json.loads(path.read_text()).get("mcpServers", {}).get("aiws") if path.exists() else None
@@ -101,26 +118,26 @@ def install(workspace: Path, agent: str) -> None:
             launcher = legacy / "aiws"
 
     documents = [
-        (workspace / "AGENTS.md", (source / "AGENTS.md").read_text(encoding="utf-8")),
+        (workspace / "AGENTS.md", (source / "engine/workspace_rules.md").read_text(encoding="utf-8")),
         (workspace / "START.md", (source / "WORKSPACE.md").read_text(encoding="utf-8")),
     ]
     if "claude" in agent.split(","):
         documents.append((workspace / "CLAUDE.md", "@AGENTS.md\n"))
-    files = []
     for path, content in documents:
         if path.is_symlink() or (path.exists() and not path.is_file()):
             raise ValueError(f"Refusing to write workspace document: {path}")
-        if not path.exists():
-            files.append((path, content))
 
     clients = agent.split(",")
     if any(client not in (*CLIENTS, "claude", "cli") for client in clients):
         raise ValueError("Unknown desktop client")
     env = {**os.environ, "AIWS_WORKSPACE": str(workspace)}
     subprocess.run([str(launcher), "init"], check=True, stdout=subprocess.DEVNULL, env=env)
-    for path, content in files:
+    for path, content in documents:
         path.parent.mkdir(parents=True, exist_ok=True)
-        write_file(path, content)
+        if not path.exists():
+            write_file(path, content)
+        elif path.name == "AGENTS.md" and hashlib.sha256(path.read_bytes()).hexdigest() in PREVIOUS_RULES:
+            save(path, content.encode("utf-8"))
 
     response = subprocess.check_output([str(launcher), "doctor"], text=True, env=env)
     health = json.loads(response)
@@ -130,9 +147,12 @@ def install(workspace: Path, agent: str) -> None:
     desktop_results = []
     for client in dict.fromkeys(clients):
         try:
-            client_config(workspace, launcher, client)
+            directories = client_config(workspace, launcher, client)
             if client in CLIENTS:
-                desktop_results.append(configure(client, workspace, launcher, activate=True, source=source))
+                result = configure(client, workspace, launcher, activate=True, source=source)
+                if directories:
+                    result["session_directories"] = [str(path) for path in directories]
+                desktop_results.append(result)
         except (OSError, ValueError, subprocess.SubprocessError) as exc:
             desktop_results.append(dict(client=client, status='blocked', detail=str(exc)))
     blocked = [result for result in desktop_results if result['status'] == 'blocked']

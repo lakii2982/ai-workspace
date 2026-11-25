@@ -1,0 +1,12 @@
+#!/bin/sh
+# Require Conventional Commits; the squashed PR title is what lands on main.
+set -eu
+message=$(head -n 1 "$1")
+case "$message" in
+    Merge*|Revert*|fixup!*|squash!*) exit 0 ;;
+esac
+printf '%s' "$message" | grep -Eq '^(feat|fix|refactor|perf|test|docs|chore|build|ci|release)(\([a-z0-9./-]+\))?!?: .+' || {
+    echo "Commit message must be Conventional Commits, e.g. 'fix(upgrade): 回滚后清理状态'." >&2
+    echo "Got: $message" >&2
+    exit 1
+}

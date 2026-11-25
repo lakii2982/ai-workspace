@@ -1,0 +1,6 @@
+#!/bin/sh
+# Catch undefined names and syntax errors before they reach CI.
+set -eu
+files=$(git diff --cached --name-only --diff-filter=ACM | grep '\.py$' || true)
+[ -n "$files" ] || exit 0
+exec uvx ruff@0.17.6 check --select E9,F --output-format concise $files
