@@ -31,7 +31,7 @@ def test_activation_preserves_workspace(tmp_path, monkeypatch, failure):
         runtime = release / 'engine/.venv'
         runtime.parent.mkdir(parents=True)
         runtime.symlink_to(engine / '.venv', target_is_directory=True)
-    monkeypatch.setattr(upgrade, 'resolve_channel', lambda: (sha, 'stable'))
+    monkeypatch.setattr(upgrade, 'resolve_channel', lambda channel=None: (sha, 'stable'))
 
     def prepare(*args):
         if failure == 'migration':
