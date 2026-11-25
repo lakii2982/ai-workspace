@@ -85,3 +85,12 @@ DELIVERABLE_REQUIRED：任务转completed时，若 工作/JOB/工作稿/ 仍有�
 - `request_publication(jid,project_id,name,target_name,reason,lease_token?)` 生成绑定源和目标版本的决定事项。`list_decisions(project_id,jid?,state?,limit?,offset?)` 可分页。用户审阅后 `resolve_publication(jid,project_id,decision_id,approve,source_hash,note?,lease_token?)` 处理指定版本。被新版替换的源稿确认时标为 superseded。
 - `save_scenario(jid,title,instructions,reason,confirmed?,expected_version?,scenario_id?,lease_token?)` 保存已泛化的模板、步骤和验收示例。更新时携带原版本及长期修改确认。`list_scenarios` 和 `read_scenario` 用于检索或读取旧版。`apply_scenario(jid,scenario_id,version?,lease_token?)` 将版本固定到任务。任务接续返回 scenarios 与 publication_decisions。
 - MCP 的 `verify_desktop_binding` 读取当前握手中的客户端名称和版本；CLI `call list_host_bindings` 可查看历史连接。首次连接记录不代表重启或弹窗测试已通过。
+
+## 框架问题反馈
+
+- `report_issue(title, details, steps?, expected?, component?, confirm=false, include_environment=true, client?)`：用户同意后把框架自身的问题提交到上游仓库。`confirm=false` 只返回 `requires_confirmation`、`repository`、`issue`（标题与正文）和 `submission`，不写文件、不联网；Agent 把标题和正文展示给用户，用户同意后再带 `confirm=true` 调用。
+- 提交方式：本机 `gh` 已安装并通过 `gh auth status` 时执行 `gh issue create --repo <仓库> --title <标题> --body-file -`，返回 `status=submitted` 和 Issue `url`；否则返回 `status=manual` 和预填好的新建 Issue 链接，由用户点开提交。`gh` 提交失败同样降级为链接，并在 `submission.error` 记录异常类型。
+- 提交记录写入 `.workspace/feedback/reports/<报告ID>.json`，并附一份同名 `.md`；记录 `status`、`url`、`fingerprint` 与完整正文。相同标题和正文已经成功提交时返回原结果并带 `replayed=true`，不重复创建。
+- 正文环境块只含框架版本、系统版本、Python 版本、工作空间格式、提交时间和客户端名称；不含工作空间路径、项目名称、文件名或文件内容。`include_environment=false` 可省略整个环境块。
+- 默认仓库为 `lakii2982/ai-workspace`，可用环境变量 `AIWS_ISSUE_REPO=owner/name` 覆盖（用于开发实例或镜像）。
+- 参数上限：`title` 120 字符、`details` 8000、`expected` 2000、`component` 200、`steps` 20 条且每条 500；`title` 会折叠为单行。

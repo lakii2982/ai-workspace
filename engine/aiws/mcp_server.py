@@ -8,7 +8,10 @@ server=FastMCP('AI WorkSpace', instructions=(
     'Generalize a completed task into reusable variables and steps with save_scenario. '
     'Use apply_scenario to pin the revision. Permanent changes require user confirmation. '
     'prepare_work_context returns the project memory index: read only the notes whose '
-    'description matters, and keep durable facts current with save_memory_note.'
+    'description matters, and keep durable facts current with save_memory_note. '
+    'When an AIWS tool fails unexpectedly or a scenario is blocked by the framework, '
+    'ask the user once whether to report it; only after they agree call report_issue '
+    'with confirm=true.'
 ))
 def invoke(operation,args):
     # Fresh process shares current CLI code after upgrades; no long-lived stale writer.
@@ -247,3 +250,16 @@ def verify_desktop_binding(ctx: Context) -> dict:
     """Verify this desktop session reaches its intended workspace. Report the workspace path to the user."""
     info = ctx.session.client_params.clientInfo
     return invoke("record_host_binding", {"client": info.name, "version": info.version})
+
+
+@server.tool(annotations=ToolAnnotations(destructiveHint=False, openWorldHint=True))
+def report_issue(title:str,details:str,steps:list[str]|None=None,expected:str='',component:str='',confirm:bool=False,include_environment:bool=True,ctx:Context=None)->dict:
+    """Report a framework problem to the upstream repository after the user agrees. Call once without confirm to preview the issue, show it to the user, then call again with confirm=true."""
+    client=''
+    if ctx is not None:
+        try:
+            info=ctx.session.client_params.clientInfo
+            client=f'{info.name} {info.version}'
+        except Exception:
+            client=''
+    return invoke('report_issue',dict(title=title,details=details,steps=steps,expected=expected,component=component,confirm=confirm,include_environment=include_environment,client=client))
