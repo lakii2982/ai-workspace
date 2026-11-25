@@ -40,7 +40,7 @@ def test_timeline_cas_and_replay(tmp_path):
     assert t.append(**args)['replayed']
     with pytest.raises(Error):t.append(**{**args,'event_id':'decision-2'})
     with pytest.raises(Error):t.append(**{**args,'summary':'篡改'})
-    assert path.read_text().count('## 2026-11-12')==1
+    assert path.read_text().count('<!-- event:decision-1 ')==1
 
 
 def test_thousand_projects_bounded_context(tmp_path):

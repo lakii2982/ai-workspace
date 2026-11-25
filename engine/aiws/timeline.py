@@ -50,25 +50,24 @@ class Timeline:
             body += f'- 记忆：{memory["category"]}；性质：{memory["state"]}\n- 理由：{memory["reason"]}\n'
             if memory['supersedes']:
                 body += '- 替代/解决：' + ', '.join(memory['supersedes']) + '\n'
+        # One-way escape: prose can never terminate its own block. There is no decoder,
+        # so the transform cannot corrupt a reader's literal text on the way back.
+        body = body.replace('<!--', r'<\!--')
         fingerprint = hashlib.sha256(body.encode()).hexdigest()
         marker = f'<!-- event:{event_id} hash:{fingerprint} -->'
-        chunk = marker + '\n'
-        if memory is not None:
-            data = dict(format_version=1, event_id=event_id, event_date=event_date,
-                        record_date=record_date, kind=kind, summary=summary, status=status,
-                        impact=impact, owner=owner, next_action=next_action, sources=sources,
-                        memory=memory, body=body)
-            # Escape comment terminators in supplied prose without changing decoded JSON.
-            encoded = json.dumps(data, ensure_ascii=False).replace('-->', '\\u002d\\u002d>')
-            chunk += '<!-- aiws-memory:' + encoded + ' -->\n'
-        chunk += body
-        if memory is not None:
-            chunk += '<!-- /aiws-event -->\n'
+        data = dict(format_version=1, event_id=event_id, event_date=event_date,
+                    record_date=record_date, kind=kind, summary=summary, status=status,
+                    impact=impact, owner=owner, next_action=next_action, sources=sources,
+                    memory=memory, body=body)
+        # Escape comment terminators in the payload; the decoded JSON is unchanged.
+        encoded = json.dumps(data, ensure_ascii=False).replace('-->', '\\u002d\\u002d>')
+        chunk = (marker + '\n<!-- aiws-memory:' + encoded + ' -->\n'
+                 + body + '<!-- /aiws-event -->\n')
         with self.w.lock('file:' + relative):
             old = path.read_text() if path.exists() else '# Project timeline\n'
             if f'<!-- event:{event_id} ' in old:
                 if chunk.strip() not in old:
-                    raise Error('CONFLICT', 'Event ID reused or its recorded content changed')
+                    raise Error('CONFLICT', 'Event ID already recorded with different content; use a new event ID')
                 return {'path': relative, 'hash': digest(path), 'replayed': True}
             if (digest(path) if path.exists() else None) != expected_hash:
                 raise Error('CONFLICT', 'Timeline changed')
@@ -90,26 +89,33 @@ class Timeline:
         else:
             text = content.decode().replace('\r\n', '\n').replace('\r', '\n')
             sha = hashlib.sha256(content).hexdigest()
-        records, pending = [], []
+        records, plain, pending = [], [], []
         for match in BLOCK.finditer(text):
             line = text.count('\n', 0, match.start()) + 1
             location = dict(path=relative, hash=sha, locator=f'line:{line}')
             try:
                 data = json.loads(match[3])
+                memory = data.get('memory')
                 valid = (data.get('format_version') == 1 and data.get('event_id') == match[1]
                          and data.get('body') == match[4]
-                         and hashlib.sha256(match[4].encode()).hexdigest() == match[2]
-                         and data['memory']['category'] in CATEGORIES and data['memory']['state'] in STATES)
+                         and hashlib.sha256(match[4].encode()).hexdigest() == match[2])
+                if valid and memory is not None:
+                    valid = (isinstance(memory, dict) and memory.get('category') in CATEGORIES
+                             and memory.get('state') in STATES)
             except (ValueError, KeyError, TypeError):
-                data, valid = {}, False
+                data, memory, valid = {}, None, False
             item = {**data, **location, 'event_id': match[1], 'current_body': match[4]}
-            if valid:
-                item['derived_state'] = data['memory']['state']
-                item['replaced_by'] = []
-                records.append(item)
-            else:
+            if not valid:
                 item['derived_state'] = 'needs_review'
                 pending.append(item)
+            elif memory is None:
+                # A recorded event that is not a memory claim: visible, never authoritative.
+                item['derived_state'] = 'plain'
+                plain.append(item)
+            else:
+                item['derived_state'] = memory['state']
+                item['replaced_by'] = []
+                records.append(item)
         # Current meaning is explicit, never inferred from latest timestamp.
         by_id = {r['event_id']: r for r in records}
         for record in records:
@@ -152,14 +158,22 @@ class Timeline:
             meaningful.append(stripped)
         if meaningful:
             legacy = [dict(path=relative, hash=sha, locator='line:1', state='unstructured', text=legacy_text)]
-        return records, pending, legacy
+        return records, plain, pending, legacy
+
+    def unstructured_count(self, project_id):
+        """Event markers that predate the self-contained block format (no payload)."""
+        _, path = self._path(project_id)
+        if not path.exists():
+            return 0
+        text = path.read_text()
+        return max(0, len(re.findall(r'<!-- event:', text)) - len(BLOCK.findall(text)))
 
     def list_memory(self, project_id, query='', categories=None, view='current', limit=20, offset=0):
         if view not in ('current', 'history') or type(limit) is not int or not 1 <= limit <= 100 or type(offset) is not int or offset < 0:
             raise Error('INVALID_ARGUMENT', 'Invalid view/pagination')
         if not isinstance(query, str) or (categories is not None and (not isinstance(categories, list) or not set(categories) <= CATEGORIES)):
             raise Error('INVALID_ARGUMENT', 'Invalid memory query/categories')
-        records, pending, legacy = self._read(project_id)
+        records, plain, pending, legacy = self._read(project_id)
         tentative = [r for r in records if r['derived_state'] == 'tentative']
         # Space-separated search terms are alternatives. Quoted text explicitly requests
         # an exact phrase; a single unspaced Chinese term retains literal matching.
@@ -172,14 +186,17 @@ class Timeline:
             return (not categories or r['memory']['category'] in categories) and any(term in text for term in terms)
         rows = [r for r in records if matches(r) and (view == 'history' or r['derived_state'] == 'established' or (r['memory']['category'] == 'question' and r['derived_state'] == 'tentative'))]
         rows.reverse()
+        events = [{k: r.get(k) for k in ('event_id', 'summary', 'kind', 'status', 'event_date', 'locator')}
+                  for r in reversed(plain)]
         return dict(items=rows[offset:offset + limit], has_more=len(rows) > offset + limit,
                     next_offset=offset + limit if len(rows) > offset + limit else None,
-                    total=len(rows), tentative=[r for r in tentative if matches(r)], legacy=legacy,
-                    pending_review=pending)
+                    total=len(rows), tentative=[r for r in tentative if matches(r)],
+                    events=events[:20], events_total=len(events),
+                    legacy=legacy, pending_review=pending)
 
     def read_memory(self, project_id, event_id, include_history=True):
-        records, pending, legacy = self._read(project_id)
-        by_id = {r['event_id']: r for r in records + pending}
+        records, plain, pending, legacy = self._read(project_id)
+        by_id = {r['event_id']: r for r in records + plain + pending}
         if event_id not in by_id:
             raise Error('NOT_FOUND', 'Structured memory event not found; inspect legacy entries')
         item = dict(by_id[event_id])
@@ -188,7 +205,7 @@ class Timeline:
             history = []
             while queue:
                 current = by_id[queue.pop()]
-                for related in current.get('memory', {}).get('supersedes', []) + current.get('replaced_by', []):
+                for related in (current.get('memory') or {}).get('supersedes', []) + current.get('replaced_by', []):
                     if related in by_id and related not in visited:
                         visited.add(related); queue.append(related); history.append(by_id[related])
             item['history'] = history
