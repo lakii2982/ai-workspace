@@ -1,6 +1,6 @@
 """Verified cutover with explicit manifests; no business file moves."""
 import platform
-from .core import Error, load, put_json, now
+from .core import Error, put_json, now
 from .remote_store import RemoteStore, enabled
 from .jobs import Jobs
 

@@ -1,4 +1,3 @@
-from pathlib import Path
 import pytest
 from docx import Document
 from aiws.core import Workspace, Error

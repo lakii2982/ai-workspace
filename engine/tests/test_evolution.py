@@ -36,7 +36,7 @@ def test_timeline_cas_and_replay(tmp_path):
     w=Workspace(tmp_path);w.init();p=w.project_create('项目')
     path=w.root/p['path']/'记忆/TIMELINE.md'
     args=dict(project_id=p['project_id'],event_id='decision-1',event_date='2026-11-12',record_date='2026-11-12',kind='decision',summary='决定',status='生效',impact='范围',owner='待确认',next_action='测试',sources=['用户授权'],expected_hash=digest(path))
-    t=Timeline(w);first=t.append(**args)
+    t=Timeline(w);t.append(**args)
     assert t.append(**args)['replayed']
     with pytest.raises(Error):t.append(**{**args,'event_id':'decision-2'})
     with pytest.raises(Error):t.append(**{**args,'summary':'篡改'})

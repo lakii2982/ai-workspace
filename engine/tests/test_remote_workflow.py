@@ -2,7 +2,7 @@ import copy
 import json
 import time
 import pytest
-from aiws.core import Workspace, Error, put_json, digest
+from aiws.core import Workspace, Error, put_json
 from aiws.jobs import Jobs
 from aiws.service import Service
 from aiws.remote_store import RemoteStore
@@ -35,7 +35,7 @@ def test_remote_authority_claim_publish_and_rollback(remote_workspace):
     with pytest.raises(Error,match='Claim'):s.call('checkpoint_job',dict(jid=jid,revision=1,patch={'status':'in_progress'}))
     claim=s.call('claim_job',dict(jid=jid,owner='client-A',revision=1));token=claim['lease']['token']
     with pytest.raises(Error):s.call('claim_job',dict(jid=jid,owner='client-B',revision=2))
-    changed=s.call('checkpoint_job',dict(jid=jid,revision=2,lease_token=token,patch={'status':'in_progress'}))
+    s.call('checkpoint_job',dict(jid=jid,revision=2,lease_token=token,patch={'status':'in_progress'}))
     with pytest.raises(Error):s.call('checkpoint_job',dict(jid=jid,revision=2,lease_token=token,patch={}))
     saved=s.call('write_work_file',dict(jid=jid,project_id=p['project_id'],name='方案.md',content='v1',lease_token=token))
     with pytest.raises(Error):s.call('publish_file',dict(jid=jid,project_id=p['project_id'],source=saved['path'],source_hash=saved['hash'],name='方案.md',lease_token=token))
@@ -67,7 +67,7 @@ def test_expired_token_and_session(tmp_path):
     token=claimed['lease']['token'];current=Jobs(w).get(j['job_id']);current['lease']['expires']=time.time()-1
     Jobs(w).persist(current)
     with pytest.raises(Error):s.call('checkpoint_job',dict(jid=j['job_id'],revision=2,patch={},lease_token=token))
-    second=s.call('claim_job',dict(jid=j['job_id'],owner='B',revision=2))
+    s.call('claim_job',dict(jid=j['job_id'],owner='B',revision=2))
     with pytest.raises(Error):s.call('checkpoint_job',dict(jid=j['job_id'],revision=3,patch={},lease_token=token))
     s.call('bind_session',dict(session_id='tool-B',jid=j['job_id']))
     assert s.call('resume_session',dict(session_id='tool-B'))['revision']==3

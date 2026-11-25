@@ -9,7 +9,7 @@ import platform
 import time
 import datetime as dt
 from .core import Error, load, put_json
-from .feishu import Feishu, JOB_FIELDS, PROJECT_FIELDS
+from .feishu import Feishu
 
 
 PROJECT_STATUS={'new':'待启动','active':'进行中','paused':'暂停','completed':'已完成','archived':'已归档'}

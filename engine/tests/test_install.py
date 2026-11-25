@@ -14,7 +14,7 @@ def test_install_keeps_core_and_workspace_separate(tmp_path):
     core = root / "aiws_core"
     runtime = core / "engine" / ".venv" / "bin"
     runtime.mkdir(parents=True)
-    for path in ("aiws", "install.sh", "AGENTS.md", "WORKSPACE.md", "engine/install_workspace.py", "engine/desktop_install.py", "engine/upgrade.py"):
+    for path in ("aiws", "install.sh", "WORKSPACE.md", "engine/workspace_rules.md", "engine/install_workspace.py", "engine/desktop_install.py", "engine/upgrade.py"):
         shutil.copy2(checkout / path, core / path)
 
     # Reuse the test interpreter while exercising the real installer and launchers.

@@ -1,8 +1,6 @@
 import os
 from mcp.server.fastmcp import FastMCP, Context
 from mcp.types import ToolAnnotations
-from .service import Service
-from .core import Error
 
 server=FastMCP('AI WorkSpace', instructions=(
     'Use the bound project and resume the task. Edit Office files with checkout_draft and '

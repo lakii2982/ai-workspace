@@ -2,7 +2,6 @@
 import asyncio
 import io
 import json
-import os
 import plistlib
 import re
 import shlex
@@ -119,7 +118,7 @@ def archive(path, files):
 def configure(client, workspace, launcher, *, activate=False, source=None):
     entry = {'command': str(launcher), 'args': ['--mcp'], 'env': {'AIWS_WORKSPACE': str(workspace)}}
     directory = workspace / '.workspace' / 'desktop' / client
-    rules = ((source or launcher.parent) / 'AGENTS.md').read_text()
+    rules = ((source or launcher.parent) / 'engine/workspace_rules.md').read_text()
     skill = '---\nname: aiws\ndescription: 管理本机项目、接续任务、保存成果和复用工作场景。\n---\n\n' + rules
     result = dict(client=client, status='awaiting_host_verification')
     if client == 'codex':
