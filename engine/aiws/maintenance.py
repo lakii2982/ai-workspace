@@ -11,13 +11,14 @@ class Maintenance:
     def __init__(self,w):self.w=w
     def doctor(self):
         load(self.w.path('.workspace/config.json'))
-        projects=self.w.projects();jobs=Jobs(self.w).list()
+        projects=self.w.projects();jobs,issues=Jobs(self.w).scan()
         with Retrieval(self.w).connect() as db: integrity=db.execute('PRAGMA integrity_check').fetchone()[0]
         bad=[]
         for j in jobs:
-            for a in Jobs(self.w).resume(j['job_id'],detail='full')['artifact_integrity']:
+            for a in Jobs(self.w).resume_record(j,detail='full')['artifact_integrity']:
                 if a['integrity']!='ok':bad.append(a['path'])
-        return {'healthy':integrity=='ok' and not bad,'sqlite':integrity,'projects':len(projects),'jobs':len(jobs),'changed_artifacts':bad}
+        return {'healthy':integrity=='ok' and not bad and not issues,'sqlite':integrity,'projects':len(projects),
+                'jobs':len(jobs),'changed_artifacts':bad,'issues':issues}
     def backup(self):
         # All mutating services take the shared workspace gate; backup takes exclusive gate.
         import fcntl
