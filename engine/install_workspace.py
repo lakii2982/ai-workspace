@@ -118,7 +118,7 @@ def install(workspace: Path, agent: str) -> None:
             launcher = legacy / "aiws"
 
     documents = [
-        (workspace / "AGENTS.md", (source / "AGENTS.md").read_text(encoding="utf-8")),
+        (workspace / "AGENTS.md", (source / "engine/workspace_rules.md").read_text(encoding="utf-8")),
         (workspace / "START.md", (source / "WORKSPACE.md").read_text(encoding="utf-8")),
     ]
     if "claude" in agent.split(","):

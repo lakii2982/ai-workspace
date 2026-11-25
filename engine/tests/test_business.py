@@ -1,5 +1,4 @@
 """Synthetic business pipelines. No customer data; outputs are deterministic acceptance fixtures."""
-import json
 import subprocess
 import sys
 from aiws.core import Workspace
@@ -26,7 +25,7 @@ def test_e2e_a_b_c_d(tmp_path):
     text='原件事实：'+procurement[0]['snippet']+'\n来源：'+citation(procurement[0])+'\n公司事实：'+company[0]['snippet']+'\n来源：'+citation(company[0])+'\n建议：核实需求波动后评估分批采购。\n分析假设：需求稳定，尚待确认。'
     assert '90天' not in text and 'B_ONLY' not in text
     service=Service(w.root);draft=a['path']+'/工作/'+j['job_id']+'/v1.md'
-    first=service.call('save_artifact',dict(jid=j['job_id'],relative=draft,content=text))
+    service.call('save_artifact',dict(jid=j['job_id'],relative=draft,content=text))
     # B: explicitly authorized combined scope; facts, arithmetic, assumptions separated.
     both={**base,'project_ids':[a['project_id'],b['project_id']]}
     pay=facts('采购付款',both)[0];revenue=facts('销售回款',both)[0]

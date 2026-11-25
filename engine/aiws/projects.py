@@ -1,5 +1,5 @@
 """Project metadata updates through the same coordinator."""
-from .core import Error, digest, load, put_json
+from .core import Error, digest, put_json
 from .remote_store import enabled,RemoteStore
 
 class Projects:

@@ -54,7 +54,14 @@ def test_unpack_rejects_a_foreign_root(tmp_path):
 
 def test_resolve_main_honours_the_pinned_commit(monkeypatch):
     monkeypatch.setenv('AIWS_UPGRADE_SHA', 'b' * 40)
-    assert upgrade.resolve_main() == 'b' * 40
+    monkeypatch.delenv('AIWS_CHANNEL', raising=False)
+    assert upgrade.resolve_main() == ('b' * 40, 'stable')
+
+
+def test_resolve_main_keeps_the_requested_channel_when_pinned(monkeypatch):
+    monkeypatch.setenv('AIWS_UPGRADE_SHA', 'b' * 40)
+    monkeypatch.setenv('AIWS_CHANNEL', 'preview')
+    assert upgrade.resolve_main() == ('b' * 40, 'preview')
 
 
 def test_resolve_main_rejects_a_malformed_pin(monkeypatch):

@@ -25,7 +25,6 @@ class Maintenance:
     def backup(self):
         # All mutating services take the shared workspace gate; backup takes exclusive gate.
         import fcntl
-        from .core import atomic
         with self.w.lock('backup'):
             gate=self.w.path('.workspace/gate.lock');gate.touch(exist_ok=True)
             with gate.open('r') as lock:

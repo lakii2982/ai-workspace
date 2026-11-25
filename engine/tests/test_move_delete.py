@@ -1,6 +1,6 @@
 import pytest
 
-from aiws.core import Error, Workspace, digest
+from aiws.core import Error, Workspace
 from aiws.jobs import Jobs
 from aiws.service import Service
 

@@ -11,7 +11,7 @@ def test_backup_restore_new_path(tmp_path):
     (root/p['path']/'资料/a.txt').write_text('采购周期30天')
     j=Jobs(w).create('采购方案','形成改进建议',s)
     artifact=p['path']+'/工作/'+j['job_id']+'/draft.txt'
-    saved=Service(root).call('save_artifact',{'jid':j['job_id'],'relative':artifact,'content':'原件事实：采购周期30天。建议：核实订单波动。'})
+    Service(root).call('save_artifact',{'jid':j['job_id'],'relative':artifact,'content':'原件事实：采购周期30天。建议：核实订单波动。'})
     b=Maintenance(w).backup();target=tmp_path/'restored'
     result=Maintenance(w).restore(b['path'],target)
     assert result['health']['healthy']

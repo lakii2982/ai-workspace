@@ -3,6 +3,11 @@
 !/LICENSE
 !/README.md
 !/AGENTS.md
+!/CLAUDE.md
+!/CONTRIBUTING.md
+!/Makefile
+!/.githooks/
+!/scripts/
 !/WORKSPACE.md
 !/aiws
 !/install.sh

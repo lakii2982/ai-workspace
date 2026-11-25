@@ -1,6 +1,8 @@
 import importlib.util
+import io
 import json
 from pathlib import Path
+from urllib.error import HTTPError
 import pytest
 
 from aiws.core import Workspace
@@ -29,7 +31,7 @@ def test_activation_preserves_workspace(tmp_path, monkeypatch, failure):
         runtime = release / 'engine/.venv'
         runtime.parent.mkdir(parents=True)
         runtime.symlink_to(engine / '.venv', target_is_directory=True)
-    monkeypatch.setattr(upgrade, 'resolve_main', lambda: sha)
+    monkeypatch.setattr(upgrade, 'resolve_channel', lambda channel=None: (sha, 'stable'))
 
     def prepare(*args):
         if failure == 'migration':
@@ -55,3 +57,40 @@ def test_activation_preserves_workspace(tmp_path, monkeypatch, failure):
         assert upgrade.current(root, state) == candidate
     assert real_cli(upgrade.current(root, state), workspace, 'job', 'resume',
                     '--params', '{"jid":"JOB-0001"}')['title'] == '任务'
+
+
+def test_stable_channel_falls_back_to_main_before_first_release(monkeypatch):
+    seen = []
+
+    def respond(url, timeout=None):
+        seen.append(url.full_url)
+        if url.full_url.endswith('/commits/stable'):
+            raise HTTPError(url.full_url, 404, 'Not Found', None, None)
+        return io.BytesIO(json.dumps({'sha': 'b' * 40}).encode())
+
+    monkeypatch.delenv('AIWS_CHANNEL', raising=False)
+    monkeypatch.setattr(upgrade, 'urlopen', respond)
+    assert upgrade.resolve_channel() == ('b' * 40, 'main')
+    assert seen == [
+        'https://api.github.com/repos/lakii2982/ai-workspace/commits/stable',
+        'https://api.github.com/repos/lakii2982/ai-workspace/commits/main',
+    ]
+
+
+def test_preview_channel_reads_main(monkeypatch):
+    seen = []
+
+    def respond(url, timeout=None):
+        seen.append(url.full_url)
+        return io.BytesIO(json.dumps({'sha': 'c' * 40}).encode())
+
+    monkeypatch.setenv('AIWS_CHANNEL', 'preview')
+    monkeypatch.setattr(upgrade, 'urlopen', respond)
+    assert upgrade.resolve_channel() == ('c' * 40, 'main')
+    assert seen == ['https://api.github.com/repos/lakii2982/ai-workspace/commits/main']
+
+
+def test_unknown_channel_is_rejected(monkeypatch):
+    monkeypatch.setattr(upgrade, 'urlopen', lambda *args, **kwargs: pytest.fail('should not fetch'))
+    with pytest.raises(ValueError, match='channel'):
+        upgrade.resolve_channel('nightly')
