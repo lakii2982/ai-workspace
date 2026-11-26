@@ -103,8 +103,6 @@ class Workspace:
                 raise Error('DUPLICATE_PROJECT','Invalid or duplicate project identity')
             seen.add(pid)
             result.append({**data,'path':meta.parent.relative_to(self.root).as_posix()})
-        with self.lock('registry'):
-            put_json(self.path('.workspace/registry/projects.json'),{'schema_version':1,'projects':result})
         self._projects_cache=result
         return result
 
@@ -155,7 +153,9 @@ class Workspace:
         from .remote_store import enabled, RemoteStore
         if enabled(self):RemoteStore(self).write('projects',pid,{**data,'path':target.relative_to(self.root).as_posix()})
         self._projects_cache=None
-        return next(p for p in self.projects() if p['project_id']==pid)
+        created=next(p for p in self.projects() if p['project_id']==pid)
+        # Git stays opt-in (AGENTS.md), but the caller must see that it is off.
+        return {**created,'git':{'enabled':False,'hint':'Call initialize_project_git to enable change tracking for this project'}}
 
     def scope(self, scope):
         required = {'include_company','include_professional','project_ids','topic_ids'}

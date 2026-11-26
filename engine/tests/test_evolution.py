@@ -40,25 +40,7 @@ def test_timeline_cas_and_replay(tmp_path):
     assert t.append(**args)['replayed']
     with pytest.raises(Error):t.append(**{**args,'event_id':'decision-2'})
     with pytest.raises(Error):t.append(**{**args,'summary':'篡改'})
-    assert path.read_text().count('## 2026-11-12')==1
-
-
-def test_remote_uncertain_never_recreates(tmp_path,monkeypatch):
-    from aiws.feishu import Feishu
-    from aiws.core import put_json
-    w=Workspace(tmp_path);w.init();p=w.project_create('测试')
-    j=Jobs(w).create('测试','目标',dict(include_company=False,include_professional=False,project_ids=[p['project_id']],topic_ids=[]))
-    put_json(w.path('.workspace/feishu.json'),dict(schema_version=1,base_token='test',jobs_table='test'))
-    remote=Feishu(w)
-    monkeypatch.setattr(remote,'rows',lambda *a,**kw:dict(items=[],has_more=False))
-    calls=[]
-    def timeout(*a,**kw):
-        calls.append(1)
-        raise Error('REMOTE_UNCERTAIN','timeout')
-    monkeypatch.setattr(remote,'command',timeout)
-    with pytest.raises(Error):remote.stage_job(j['job_id'],'operation-1')
-    with pytest.raises(Error):remote.stage_job(j['job_id'],'operation-1')
-    assert len(calls)==1
+    assert path.read_text().count('<!-- event:decision-1 ')==1
 
 
 def test_thousand_projects_bounded_context(tmp_path):

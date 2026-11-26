@@ -4,6 +4,8 @@ from .core import Error, atomic, digest, load, now, put_json
 
 STATES={'new','in_progress','review','completed','blocked','cancelled'}
 TEXT_LISTS=['acceptance','completed','next_steps','open_issues','decisions']
+REQUIRED=('job_id','title','goal','status','last_agent','updated_at','scope','revision',
+          'acceptance','completed','next_steps','open_issues','decisions','artifacts','sources')
 class Jobs:
     def __init__(self,w):self.w=w
     @staticmethod
@@ -31,6 +33,9 @@ class Jobs:
         if not isinstance(jid,str) or not jid.startswith('JOB-') or not jid[4:].isdigit(): raise Error('INVALID_ARGUMENT','Invalid job ID')
         return self.w.path(f'.workspace/jobs/{jid}/job.json')
     def validate(self,j):
+        if not isinstance(j,dict):raise Error('INVALID_DATA','Job record must be an object')
+        missing=[k for k in REQUIRED if k not in j]
+        if missing:raise Error('INVALID_DATA','Missing job fields: '+', '.join(missing))
         self.validate_context(j.get('context',{}))
         if j.get('schema_version')!=1: raise Error('SCHEMA_UNSUPPORTED','Unsupported job schema')
         self.file(j['job_id']);self.w.scope(j['scope'])
@@ -45,6 +50,21 @@ class Jobs:
                 if not isinstance(item,dict) or any(not isinstance(item.get(f),str) for f in fields):raise Error('INVALID_DATA',f'Invalid {key} record')
                 if key=='artifacts':self.w.allowed(item['path'],j['scope'],drafts=True)
         return j
+    def scan(self):
+        """Load every job, isolating unreadable records instead of failing the caller."""
+        jobs, issues = [], []
+        for path in sorted(self.w.path('.workspace/jobs').glob('JOB-*/job.json')):
+            jid = path.parent.name
+            relative = path.relative_to(self.w.root).as_posix()
+            try:
+                jobs.append(self.get(jid))
+            except Error as e:
+                issues.append(dict(job_id=jid, path=relative, code=e.code, message=e.message))
+            except Exception as e:
+                issues.append(dict(job_id=jid, path=relative, code='INTERNAL_ERROR',
+                                   message=type(e).__name__))
+        return jobs, issues
+    # Strict on purpose: migration and full dumps must fail loudly on corrupt data.
     def list(self): return [self.get(p.parent.name) for p in sorted(self.w.path('.workspace/jobs').glob('JOB-*/job.json'))]
     def get(self,jid):
         from .remote_store import enabled, RemoteStore
@@ -109,9 +129,27 @@ class Jobs:
             if delivered:continue
             pending.append({'project_id':pid,'work':drafts.relative_to(self.w.root).as_posix(),'deliverables':done.relative_to(self.w.root).as_posix(),'files':[x.relative_to(drafts).as_posix() for x in files[:10]],'count':len(files)})
         return pending
+    @staticmethod
+    def verification_shape(checks,acceptance):
+        """Shape rules shared by every checkpoint; files are read only on completion."""
+        if not isinstance(checks,list) or len(checks)!=len(acceptance):
+            raise Error('ACCEPTANCE_REQUIRED','One evidence record per acceptance criterion required')
+        for criterion,check in zip(acceptance,checks):
+            if not isinstance(check,dict) or check.get('criterion')!=criterion:
+                raise Error('ACCEPTANCE_REQUIRED','Evidence must name its acceptance criterion')
+            path,hashed=check.get('path'),check.get('hash')
+            if bool(path)!=bool(hashed):
+                raise Error('ACCEPTANCE_REQUIRED','Evidence path and hash must be given together')
+            if path is not None and (not isinstance(path,str) or not isinstance(hashed,str)):
+                raise Error('ACCEPTANCE_REQUIRED','Invalid evidence reference')
+        return checks
     def checkpoint(self,jid,revision,patch,reopen=False,lease_token=None):
-        allowed={'title','goal','acceptance','status','last_agent','completed','next_steps','open_issues','decisions','artifacts','sources','verification','context'}
-        if not isinstance(patch,dict) or not set(patch)<=allowed:raise Error('INVALID_ARGUMENT','Unknown or immutable job fields')
+        allowed={'title','goal','acceptance','status','last_agent','completed','next_steps','open_issues','decisions','verification','context'}
+        if not isinstance(patch,dict) or not set(patch)<=allowed:
+            managed=set(patch)&{'artifacts','sources'} if isinstance(patch,dict) else set()
+            if managed:
+                raise Error('INVALID_ARGUMENT',f'{", ".join(sorted(managed))} is managed by save_artifact/publish_file; remove it from the checkpoint patch')
+            raise Error('INVALID_ARGUMENT','Unknown or immutable job fields')
         with self.w.lock('job:'+jid):
             j=self.get(jid)
             from .workflow import check_lease
@@ -119,23 +157,28 @@ class Jobs:
             check_lease(j,lease_token,require=enabled(self.w))
             if j['revision']!=revision:raise Error('CONFLICT','Job revision changed')
             new=patch.get('status',j['status'])
+            acceptance=patch.get('acceptance',j['acceptance'])
+            if 'verification' in patch:
+                self.verification_shape(patch['verification'],acceptance)
             transitions={'new':{'new','in_progress','blocked'},'in_progress':{'in_progress','review','blocked'},'review':{'review','in_progress','completed','blocked'},'blocked':{'blocked','in_progress','review'},'completed':{'completed'}}
             if new=='cancelled' and j['status'] not in ('completed','cancelled'):transitions[j['status']].add('cancelled')
             transitions['cancelled']={'cancelled'}
             if new not in transitions[j['status']] and not (reopen and j['status']=='completed' and new=='in_progress'):raise Error('INVALID_STATE','Invalid transition; completed jobs require explicit reopen')
             if new=='completed' and j['status']!='completed':
-                if not j['acceptance'] or patch.get('open_issues',j['open_issues']):raise Error('ACCEPTANCE_REQUIRED','Acceptance criteria and resolved blockers required')
+                if not acceptance or patch.get('open_issues',j['open_issues']):raise Error('ACCEPTANCE_REQUIRED','Acceptance criteria and resolved blockers required')
                 pending=self.unpromoted(j)
                 if pending:
                     p=pending[0]
                     raise Error('DELIVERABLE_REQUIRED',f"工作稿仍有{p['count']}份文件而成果目录为空：{p['work']}；定稿用 publish_file 发布到 {p['deliverables']}，不交付的移入过程材料")
-            if new=='completed' and j['status']!='completed' and enabled(self.w):
                 checks=patch.get('verification',j.get('verification',[]))
-                if not isinstance(checks,list) or len(checks)!=len(j['acceptance']):raise Error('ACCEPTANCE_REQUIRED','One evidence record per acceptance criterion required')
-                for criterion,check in zip(j['acceptance'],checks):
-                    if not isinstance(check,dict) or check.get('criterion')!=criterion or not check.get('path') or not check.get('hash'):raise Error('ACCEPTANCE_REQUIRED','Invalid verification evidence')
+                self.verification_shape(checks,acceptance)
+                for check in checks:
+                    if not check.get('path'):continue
                     self.w.allowed(check['path'],j['scope'],drafts=True)
                     if digest(self.w.path(check['path']))!=check['hash']:raise Error('CONFLICT','Verification evidence changed')
+                delivered={a['hash'] for a in j['artifacts'] if a['purpose']=='deliverable' and a['status']=='approved'}
+                if delivered and not any(c.get('hash') in delivered for c in checks):
+                    raise Error('ACCEPTANCE_REQUIRED','Evidence must reference a published deliverable')
             j.update(patch)
             if new in ('completed','cancelled'):j['lease']={}
             j['revision']+=1;j['updated_at']=now()
@@ -185,9 +228,8 @@ class Jobs:
         if enabled(self.w):return RemoteStore(self.w).query(project_id,query,status,limit,offset)
         if type(limit) is not int or not 1<=limit<=100 or type(offset) is not int or offset<0:raise Error('INVALID_ARGUMENT','Invalid pagination')
         if project_id is not None and project_id not in {p['project_id'] for p in self.w.projects()}:raise Error('INVALID_SCOPE','Unknown project')
-        rows=[]
-        for path in sorted(self.w.path('.workspace/jobs').glob('JOB-*/job.json')):
-            j=load(path)
+        rows=[]; jobs, issues = self.scan()
+        for j in jobs:
             if project_id and project_id not in j['scope']['project_ids']:continue
             if status=='active' and j['status'] in ('completed','cancelled'):continue
             if status and status!='active' and j['status']!=status:continue
@@ -195,7 +237,8 @@ class Jobs:
             rows.append({k:j[k] for k in ['job_id','title','status','revision','updated_at']})
         page=rows[offset:offset+limit]
         for row in page:row['title']=row['title'][:160]
-        return {'items':page,'has_more':offset+limit<len(rows),'next_offset':offset+limit if offset+limit<len(rows) else None}
+        return {'items':page,'has_more':offset+limit<len(rows),'next_offset':offset+limit if offset+limit<len(rows) else None,
+                'skipped':[{'job_id':i['job_id'],'code':i['code']} for i in issues]}
 
 class Artifacts:
     def __init__(self,w):self.w=w;self.jobs=Jobs(w)

@@ -1,6 +1,7 @@
 import argparse
 import json
 import os
+import traceback
 from .core import Error
 from .service import Service
 
@@ -8,6 +9,7 @@ def main():
     p=argparse.ArgumentParser(prog='aiws',description='Local scoped knowledge and persistent tasks')
     p.add_argument('--workspace',default=os.environ.get('AIWS_WORKSPACE'))
     p.add_argument('--json',action='store_true',help='All output is structured JSON')
+    p.add_argument('--debug',action='store_true',help='Print a traceback to stderr on failure')
     p.add_argument('command',choices=['init','project','index','search','source','job','artifact','backup','restore','doctor','call'])
     p.add_argument('action',nargs='?')
     p.add_argument('--name');p.add_argument('--query');p.add_argument('--project',action='append',default=[])
@@ -33,8 +35,11 @@ def main():
         result=Service(a.workspace).call(op,args)
         print(json.dumps({'ok':True,'result':result},ensure_ascii=False,indent=2))
     except Error as e:
+        if a.debug:traceback.print_exc()
         print(json.dumps({'ok':False,'error':{'code':e.code,'message':e.message}},ensure_ascii=False));raise SystemExit(1)
     except (TypeError,ValueError) as e:
+        if a.debug:traceback.print_exc()
         print(json.dumps({'ok':False,'error':{'code':'INVALID_ARGUMENT','message':str(e)}},ensure_ascii=False));raise SystemExit(1)
     except Exception as e:
-        print(json.dumps({'ok':False,'error':{'code':'INTERNAL_ERROR','message':type(e).__name__}},ensure_ascii=False));raise SystemExit(1)
+        if a.debug:traceback.print_exc()
+        print(json.dumps({'ok':False,'error':{'code':'INTERNAL_ERROR','message':f'{type(e).__name__}: {e}'}},ensure_ascii=False));raise SystemExit(1)

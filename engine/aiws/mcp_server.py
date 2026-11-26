@@ -13,17 +13,45 @@ server=FastMCP('AI WorkSpace', instructions=(
     'ask the user once whether to report it; only after they agree call report_issue '
     'with confirm=true.'
 ))
-def invoke(operation,args):
+READ_OPERATIONS = {
+    'list_projects', 'get_project', 'get_project_overview', 'list_jobs', 'list_jobs_full',
+    'resolve_job', 'list_project_memory', 'read_project_memory', 'read_scenario',
+    'list_scenarios', 'list_decisions', 'read_project_file', 'compare_project_file',
+    'search_sources', 'read_source', 'doctor', 'verify_desktop_binding',
+}
+OPERATION_TIMEOUTS = {'backup': 600, 'restore': 600, 'upgrade_core': 900}
+READ_TIMEOUT = 60
+WRITE_TIMEOUT = 180
+
+
+def timeout_for(operation):
+    if operation in OPERATION_TIMEOUTS:
+        return OPERATION_TIMEOUTS[operation]
+    return READ_TIMEOUT if operation in READ_OPERATIONS else WRITE_TIMEOUT
+
+
+def invoke(operation,args,timeout=None):
     # Fresh process shares current CLI code after upgrades; no long-lived stale writer.
     import json
     import subprocess
     import sys
+    workspace=os.environ.get('AIWS_WORKSPACE')
+    if not workspace:
+        return {'ok':False,'error':{'code':'ENTRY_UNAVAILABLE','message':'AIWS_WORKSPACE is not set'}}
+    limit=timeout or timeout_for(operation)
+    entry=[os.environ['AIWS_LAUNCHER']] if os.environ.get('AIWS_LAUNCHER') else [sys.executable,'-m','aiws']
     try:
-        entry = [os.environ['AIWS_LAUNCHER']] if os.environ.get('AIWS_LAUNCHER') else [sys.executable, '-m', 'aiws']
-        result=subprocess.run([*entry,'--workspace',os.environ['AIWS_WORKSPACE'],'call',operation,'--params',json.dumps(args,ensure_ascii=False)],capture_output=True,text=True,timeout=180)
-        return json.loads(result.stdout)
-    except (OSError,ValueError,subprocess.TimeoutExpired) as e:
+        result=subprocess.run([*entry,'--workspace',workspace,'call',operation,
+                               '--params',json.dumps(args,ensure_ascii=False)],
+                              capture_output=True,text=True,timeout=limit)
+    except subprocess.TimeoutExpired:
+        return {'ok':False,'error':{'code':'TIMEOUT','message':f'{operation} exceeded {limit}s; run doctor before retrying'}}
+    except OSError as e:
         return {'ok':False,'error':{'code':'ENTRY_UNAVAILABLE','message':type(e).__name__}}
+    try:
+        return json.loads(result.stdout)
+    except ValueError:
+        return {'ok':False,'error':{'code':'ENTRY_UNAVAILABLE','message':'Invalid response from the core'}}
 
 @server.tool(annotations=ToolAnnotations(readOnlyHint=True, destructiveHint=False))
 def list_projects(query:str='',limit:int=20,offset:int=0)->dict:
@@ -92,6 +120,18 @@ def write_work_file(jid:str,project_id:str,name:str,content:str,kind:str='draft'
     return invoke('write_work_file',dict(jid=jid,project_id=project_id,name=name,content=content,kind=kind,expected_hash=expected_hash,lease_token=lease_token))
 
 @server.tool()
+def move_work_file(jid:str,project_id:str,source:str,target_kind:str,name:str|None=None,expected_hash:str|None=None,lease_token:str|None=None)->dict:
+    """Move a draft into process material (or back) without changing its bytes. expected_hash is required."""
+    return invoke('move_work_file',dict(jid=jid,project_id=project_id,source=source,target_kind=target_kind,name=name,expected_hash=expected_hash,lease_token=lease_token))
+
+
+@server.tool()
+def delete_work_file(jid:str,project_id:str,relative:str,expected_hash:str|None=None,lease_token:str|None=None)->dict:
+    """Delete a draft or process file; published deliverables cannot be deleted. expected_hash is required."""
+    return invoke('delete_work_file',dict(jid=jid,project_id=project_id,relative=relative,expected_hash=expected_hash,lease_token=lease_token))
+
+
+@server.tool()
 def publish_file(jid:str,project_id:str,source:str,source_hash:str,name:str,expected_hash:str|None=None,confirm:bool=False,lease_token:str|None=None)->dict:
     """Publish only a specifically approved source hash; previous file goes to history."""
     return invoke('publish_file',dict(jid=jid,project_id=project_id,source=source,source_hash=source_hash,name=name,expected_hash=expected_hash,confirm=confirm,lease_token=lease_token))
@@ -100,7 +140,7 @@ def publish_file(jid:str,project_id:str,source:str,source_hash:str,name:str,expe
 def append_timeline(project_id:str,event_id:str,event_date:str,record_date:str,kind:str,summary:str,status:str,impact:str,owner:str,next_action:str,sources:list[str],expected_hash:str|None=None,memory:dict|None=None)->dict:
     return invoke('append_timeline',dict(project_id=project_id,event_id=event_id,event_date=event_date,record_date=record_date,kind=kind,summary=summary,status=status,impact=impact,owner=owner,next_action=next_action,sources=sources,expected_hash=expected_hash,memory=memory))
 
-@server.tool()
+@server.tool(annotations=ToolAnnotations(readOnlyHint=True, destructiveHint=False))
 def get_project(project_id:str)->dict:
     return invoke('get_project',dict(project_id=project_id))
 
@@ -118,16 +158,16 @@ def initialize_project_git(project_id:str)->dict:
     """Enable project-local Git snapshots without changing the framework repository."""
     return invoke('initialize_project_git',dict(project_id=project_id))
 
-@server.tool()
+@server.tool(annotations=ToolAnnotations(readOnlyHint=True, destructiveHint=False))
 def get_project_overview(project_id:str,detail:str='brief')->dict:
     return invoke('get_project_overview',dict(project_id=project_id,detail=detail))
 
-@server.tool()
+@server.tool(annotations=ToolAnnotations(readOnlyHint=True, destructiveHint=False))
 def list_project_memory(project_id:str,query:str='',categories:list[str]|None=None,view:str='current',limit:int=20,offset:int=0)->dict:
     """Find current project decisions and reasons before choosing or changing an approach."""
     return invoke('list_project_memory',dict(project_id=project_id,query=query,categories=categories,view=view,limit=limit,offset=offset))
 
-@server.tool()
+@server.tool(annotations=ToolAnnotations(readOnlyHint=True, destructiveHint=False))
 def read_project_memory(project_id:str,event_id:str,include_history:bool=True)->dict:
     return invoke('read_project_memory',dict(project_id=project_id,event_id=event_id,include_history=include_history))
 
@@ -239,7 +279,7 @@ def upgrade_core()->dict:
     launcher = os.environ.get('AIWS_LAUNCHER')
     if not launcher:
         return {'ok': False, 'error': {'code': 'ENTRY_UNAVAILABLE', 'message': 'Start MCP through aiws --mcp'}}
-    result = subprocess.run([launcher, 'upgrade'], capture_output=True, text=True)
+    result = subprocess.run([launcher, 'upgrade'], capture_output=True, text=True, timeout=900)
     try:
         return json.loads(result.stdout)
     except ValueError:
