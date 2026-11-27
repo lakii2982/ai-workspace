@@ -149,6 +149,8 @@ def test_new_task_creation_is_intentional_idempotent_and_distinct(tmp_path):
     assert opened['work']['goal'] == intent  # the original intent is preserved verbatim
     assert opened['work']['title'] == intent
     assert opened['work']['scope']['project_ids'] == [p['project_id']]
+    assert opened['project_sources'] == dict(project_id=p['project_id'], folder='资料/',
+                                             count=0, items=[], has_more=False)
     # Retry with the same request_id replays the same task, in this or another process.
     again = s.call('open_work', dict(intent=intent, project='新工作项目',
                                      new_task=True, request_id='chat-2026-01'))

@@ -19,6 +19,8 @@ def test_real_stdio(tmp_path):
             async with ClientSession(read,write) as session:
                 await session.initialize()
                 tools=await session.list_tools();assert {'list_jobs','resume_job','save_artifact','receive_source','save_memory_note','list_memory_notes','report_issue'} <= {t.name for t in tools.tools}
+                search_tool=next(tool for tool in tools.tools if tool.name=='search_sources')
+                assert {'project_ids','include_company','include_professional','topic_ids','project_id'} <= set(search_tool.inputSchema['properties'])
                 result=await session.call_tool('list_projects',{})
                 assert not result.isError and 'PRJ-0001' in str(result)
                 noted=await session.call_tool('save_memory_note',{'project_id':'PRJ-0001','name':'report-style','description':'用户偏好要点式汇报','type':'user','content':'# 汇报偏好\n\n先给结论。'})
@@ -30,11 +32,21 @@ def test_real_stdio(tmp_path):
                 assert not job.isError and 'JOB-0001' in str(job)
                 result=await session.call_tool('resume_job',{'jid':'JOB-0001'})
                 assert not result.isError and 'Verify' in str(result)
-                searched=await session.call_tool('search_sources',{'query':'采购周期','scope':scope})
+                # Structured MCP scope defaults topic_ids to []; clients no
+                # longer have to manufacture an otherwise-empty field.
+                searched=await session.call_tool('search_sources',{'query':'采购周期',
+                    'project_ids':['PRJ-0001'],'include_company':False,'include_professional':False})
                 assert payload(searched)['ok']
                 sid=payload(searched)['result']['matches'][0]['source_id']
-                readback=await session.call_tool('read_source',{'source_id':sid,'scope':scope})
+                readback=await session.call_tool('read_source',{'source_id':sid,'project_id':'PRJ-0001'})
                 assert payload(readback)['ok']
+                # The complete legacy scope remains valid, but never combines
+                # with the selected-project shorthand.
+                legacy=await session.call_tool('search_sources',{'query':'采购周期','scope':scope})
+                assert payload(legacy)['ok']
+                conflict=payload(await session.call_tool('search_sources',{
+                    'query':'采购周期','scope':scope,'project_id':'PRJ-0001'}))
+                assert conflict['ok'] is False and conflict['error']['code']=='INVALID_ARGUMENT'
                 saved=await session.call_tool('save_artifact',{'jid':'JOB-0001','relative':p['path']+'/工作/JOB-0001/draft.md','content':'MCP草稿'})
                 assert payload(saved)['ok']
                 received=await session.call_tool('receive_source',{'jid':'JOB-0001','project_id':'PRJ-0001','name':'附件.txt','content':'MCP收件 供应商报价','confirm':True})
@@ -63,6 +75,8 @@ def test_real_stdio(tmp_path):
 
 def test_open_work_stdio(tmp_path):
     w=Workspace(tmp_path);w.init();p=w.project_create('入口')
+    (w.path(p['path']+'/资料/报价.md')).write_text('报价资料')
+    (w.path(p['path']+'/资料/附件')).mkdir()
     async def run():
         params=StdioServerParameters(command=sys.executable,args=['-m','aiws.mcp_server_entry'],env={**os.environ,'AIWS_WORKSPACE':str(tmp_path)})
         async with stdio_client(params) as (read,write):
@@ -75,12 +89,19 @@ def test_open_work_stdio(tmp_path):
                 assert choices['result']['reason']=='no_project'
                 assert choices['result']['intent']=='写年度总结'
                 assert choices['result']['projects']==[{'project_id':'PRJ-0001','name':'入口','status':'active','path':p['path']}]
+                assert 'project_sources' not in choices['result']
                 # Explicit intentional creation through the same entry.
                 opened=payload(await session.call_tool('open_work',{'intent':'写年度总结','project':'入口','new_task':True,'request_id':'mcp-entry-1'}))
                 result=opened['result']
                 assert result['status']=='opened' and result['created']=={'project':False,'task':True}
                 assert result['work']['goal']=='写年度总结'
                 assert result['work']['scope']['project_ids']==['PRJ-0001']
+                sources=result['project_sources']
+                assert sources['project_id']=='PRJ-0001' and sources['folder']=='资料/' and sources['count']==2
+                quote=next(item for item in sources['items'] if item['name']=='报价.md')
+                assert quote['read']==dict(operation='read_project_file',project_id='PRJ-0001',path='资料/报价.md')
+                folder=next(item for item in sources['items'] if item['name']=='附件')
+                assert folder['kind']=='directory' and folder['recursive'] is False
                 # Retries through separate CLI processes replay the same task.
                 again=payload(await session.call_tool('open_work',{'intent':'写年度总结','project':'入口','new_task':True,'request_id':'mcp-entry-1'}))
                 assert again['result']['work']['job_id']==result['work']['job_id']

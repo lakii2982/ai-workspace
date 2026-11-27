@@ -13,6 +13,7 @@ from .workflow import Workflow
 
 CANDIDATE_LIMIT = 8
 TITLE_LIMIT = 80
+SOURCE_PREVIEW_LIMIT = 8
 CLOSED = ('completed', 'cancelled')
 
 
@@ -120,7 +121,25 @@ class Entry:
                                 created={'project': created_project, 'task': True},
                                 request_id=request_id, switch_session=True)
         result['replayed'] = replayed
+        result['project_sources'] = self._project_sources(pid)
         return result
+
+    def _project_sources(self, project_id):
+        """A bounded, non-recursive next read after explicit project selection."""
+        project=self.w.project_for(project_id)
+        folder=self.w.path(project['path']+'/资料')
+        entries=sorted(folder.iterdir(),key=lambda item:item.name.casefold())
+        items=[]
+        for entry in entries[:SOURCE_PREVIEW_LIMIT]:
+            if entry.is_file():
+                items.append(dict(name=entry.name, kind='file',
+                                  read=dict(operation='read_project_file', project_id=project_id,
+                                            path='资料/'+entry.name)))
+            elif entry.is_dir():
+                items.append(dict(name=entry.name, kind='directory', recursive=False,
+                                  note='Not listed recursively; use read_project_file with an exact child path'))
+        return dict(project_id=project_id, folder='资料/', count=len(entries), items=items,
+                    has_more=len(entries)>SOURCE_PREVIEW_LIMIT)
 
     def _open_jid(self, intent, jid, *, project=None, project_id=None, session_id=None,
                   bound_jid=None, created=None, request_id=None, switch_session=False):
