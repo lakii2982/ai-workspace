@@ -55,6 +55,7 @@ def bound_brief_payload(payload):
                                            if pending else []), 'expand':{'operation':'list_decisions','project_id':project_id,'jid':jid}}
     compact={'job_id':jid,'title':text(payload.get('title')),'goal':text(payload.get('goal')),
              'status':payload.get('status'),'revision':payload.get('revision'),
+             'scope':payload.get('scope'),
              'directories':payload.get('directories',[])[:2],
              'task':{'working_on':text((task.get('context') or {}).get('working_on','')),
                      'resume_note':text((task.get('context') or {}).get('resume_note','')),
