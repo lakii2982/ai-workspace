@@ -4,7 +4,7 @@
 
 - initialize_project_git(project_id)：显式启用项目根独立 Git；不变更框架根仓库。
 - prepare_work_context(project_id?,jid?,session_id?,intent='',detail='brief')：定位优先 jid、绑定session、明确项目；返回 identity/project_brief/task_context/git_status/observation/git_changes/memory/memory_references/reading_queue/coverage/expand。观察可创建Git对象但不推进任务revision；无Git项目仍可读背景。
-- resume_job/resume_session：保留任务结果字段，并附带快速接续的 work_context，只读取目标任务，不扫描任务列表或刷新检索索引。明确的单项目可返回主稿位置、Git 观察和已读资料的变化；无法确定唯一主稿或项目时不猜。需要完整项目上下文时，调用显式入口 prepare_work_context 或 get_project_overview。
+- resume_job/resume_session：保留任务结果字段，并附带快速接续的 work_context，只读取目标任务，不扫描任务列表或刷新检索索引。明确的单项目可返回主稿位置、Git 观察和已读资料的变化；无法确定唯一主稿或项目时不猜。若受控保存已落盘但清单未保存，返回 `recovery` 和 `recover_artifacts` 下一动作，只扫描该任务的恢复日志。需要完整项目上下文时，调用显式入口 prepare_work_context 或 get_project_overview。
 - get_project_overview(project_id,detail='brief')：完整分页聚合后裁剪，coverage提供省略数和任务revision。
 - read_project_file(project_id,path,commit=None)：项目相对路径，读取当前观察或指定Git版本；返回文本/locator/chunks及readability，不要求artifact登记。
 - compare_project_file(project_id,path,before,after=None)：提取前后文本与diff；受限格式不会伪造差异。
@@ -38,6 +38,7 @@
 - read_source: source_id(str), scope(object), expected_hash(str,可选)。复核已保存的引用时传入当时的 sha256，原件换版后返回 STALE_INDEX。
 - save_artifact: jid(str), relative(str), content(str)或content_base64(str), expected_hash(str|null,默认null表示必须不存在), confirm(bool,默认false), purpose(str,默认draft)
 - receive_source: jid(str), project_id(str), name(str,单个文件名), content(str)或content_base64(str), expected_hash(str|null,默认null表示必须不存在), confirm(bool,默认false), lease_token(str,可选), source_ref(str,可选)。聊天附件原件收件：宿主把实际读到的字节按文件名存入项目 资料/，字节只能来自宿主真实读取（文本或base64），不提供任意主机路径读取；宿主未能读取原始附件链接时必须如实告知用户，不得凭空生成内容。新收原件标记为 original。同一工作同内容重试复用首次登记。替换旧文件需 confirm=true 及旧指纹，历史原文保留。source_ref 记录原始附件出处（如聊天文件标识）写入历史事件。收件后按既有检索链路 search_sources/read_source 回读；原件变化按 STALE_INDEX 回查；范围隔离与 search_sources 相同。
+- recover_artifacts: jid(str), lease_token?(str)。仅从受控保存留下的 committed journal 回填缺失 artifact 清单。当前文件 hash、任务 scope 和记录的 artifact 必须全匹配，绝不覆盖或回滚人工改动；飞书启用时仍须有效租约，远端 pending 仍按 reconcile_remote 处理。
 - restore: archive(str), destination(str,必须为不存在目录)
 
 scope 必须包含 include_company(bool)、include_professional(bool)、project_ids(list[str])、topic_ids(list[str]，当前仅空)。未明确范围不全库回退。工作草稿默认不索引；正式成果归入项目范围。查询阶段SQL过滤，回读再次校验范围、路径和原件hash。

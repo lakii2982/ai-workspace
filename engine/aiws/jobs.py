@@ -296,7 +296,13 @@ class Artifacts:
                 conflict=self.w.path(f'.workspace/history/conflicts/{jid}/{hashlib.sha256(content).hexdigest()}')
                 atomic(conflict,content)
                 raise Error('CONFLICT','File changed; incoming revision preserved in history/conflicts')
-            event={'schema_version':1,'job_id':jid,'path':relative,'old_hash':actual,'new_hash':incoming,'confirmed':confirm and not receive,'actor':'local-user' if confirm else j['last_agent'],'time':now()}
+            artifact={'path':relative,'hash':incoming,'purpose':purpose,
+                      'status':'original' if receive else 'approved' if formal else 'draft'}
+            # Keep enough intent in the durable journal to repair a crash after
+            # the bytes are committed but before job.json can be advanced.
+            event={'schema_version':1,'job_id':jid,'path':relative,'old_hash':actual,'new_hash':artifact['hash'],
+                   'confirmed':confirm and not receive,'actor':'local-user' if confirm else j['last_agent'],
+                   'time':now(),'artifact':artifact}
             if receive and source_ref is not None:event['source_ref']=source_ref
             event_id=hashlib.sha256((relative+now()).encode()).hexdigest()
             if target.exists():
@@ -305,12 +311,92 @@ class Artifacts:
                     archive=target.parent/'历史版本'/(target.stem+'_'+actual[:12]+target.suffix)
                     atomic(archive,target.read_bytes())
             put_json(self.w.path(f'.workspace/history/events/{event_id}.json'),{**event,'phase':'prepared'})
+            recovery_record=self.w.path(f'.workspace/recovery/{jid}/{event_id}.json')
+            put_json(recovery_record,{**event,'phase':'prepared'})
             atomic(target,content)
             put_json(self.w.path(f'.workspace/history/events/{event_id}.json'),{**event,'phase':'committed'})
-            artifact={'path':relative,'hash':digest(target),'purpose':purpose,'status':'original' if receive else 'approved' if formal else 'draft'}
+            put_json(recovery_record,{**event,'phase':'committed'})
+            artifact={**artifact,'hash':digest(target)}
             with self.w.lock('job:'+jid):
                 latest=self.jobs.get(jid)
                 latest['artifacts']=[a for a in latest['artifacts']
                                      if Path(a['path']).as_posix()!=relative]+[artifact]
                 latest['revision']+=1;latest['updated_at']=now();self.jobs.persist(latest)
             return {**artifact,'replayed':False} if receive else artifact
+
+    def recovery_status(self, jid, job=None):
+        """Read only this job's recovery journal for normal resume."""
+        self.jobs.file(jid)
+        folder=self.w.path(f'.workspace/recovery/{jid}')
+        records=[] if not folder.is_dir() else [load(path) for path in sorted(folder.glob('*.json'))]
+        job=job or self.jobs.get(jid)
+        known={a['path']:a for a in job['artifacts']}
+        recoverable=[];pending=[]
+        for event in records:
+            if event.get('phase')!='committed' or event.get('job_id')!=jid:
+                continue
+            artifact=event.get('artifact')
+            if not isinstance(artifact,dict) or artifact.get('path') in known:
+                continue
+            try:
+                self.w.allowed(artifact['path'],job['scope'],drafts=True)
+                path=self.w.path(artifact['path'])
+                state='recoverable' if path.is_file() and digest(path)==artifact.get('hash') else 'changed_or_missing'
+            except Error:
+                state='outside_scope'
+            (recoverable if state=='recoverable' else pending).append({'path':artifact.get('path'),'state':state})
+        return {'recoverable':recoverable,'pending':pending}
+
+    def recover(self, jid, lease_token=None):
+        """Backfill artifact metadata for a committed, intact local file.
+
+        Recovery never writes business bytes.  It only accepts journal entries
+        emitted by :meth:`save`, validates the current task scope, and leaves
+        a manually changed file as an actionable pending item.
+        """
+        from .remote_store import enabled
+        from .workflow import check_lease
+        self.jobs.file(jid)
+        with self.w.lock('job:'+jid):
+            job=self.jobs.get(jid)
+            check_lease(job,lease_token,require=enabled(self.w))
+            known={a['path']:a for a in job['artifacts']}
+            recovered=[];pending=[]
+            recovery_folder=self.w.path(f'.workspace/recovery/{jid}')
+            # New saves have a job-local journal so resume is bounded.  The
+            # historical fallback is only used by an explicit repair command.
+            event_paths=(sorted(recovery_folder.glob('*.json')) if recovery_folder.is_dir()
+                         else sorted(self.w.path('.workspace/history/events').glob('*.json')))
+            for event_path in event_paths:
+                event=load(event_path)
+                if event.get('job_id')!=jid or event.get('phase')!='committed':
+                    continue
+                artifact=event.get('artifact')
+                if not isinstance(artifact,dict):
+                    continue
+                if set(artifact)!={'path','hash','purpose','status'} or artifact['path']!=event.get('path'):
+                    pending.append({'path':event.get('path'),'state':'invalid_journal'})
+                    continue
+                try:
+                    self.w.allowed(artifact['path'],job['scope'],drafts=True)
+                    path=self.w.path(artifact['path'])
+                    if not path.is_file() or digest(path)!=artifact['hash']:
+                        pending.append({'path':artifact['path'],'state':'changed_or_missing'})
+                        continue
+                except Error:
+                    pending.append({'path':artifact['path'],'state':'outside_scope'})
+                    continue
+                current=known.get(artifact['path'])
+                if current == artifact:
+                    continue
+                if current is not None:
+                    pending.append({'path':artifact['path'],'state':'metadata_conflict'})
+                    continue
+                known[artifact['path']]=artifact
+                recovered.append(artifact)
+            if recovered:
+                job['artifacts']=list(known.values())
+                job['revision']+=1;job['updated_at']=now()
+                self.jobs.persist(job)
+            return {'job_id':jid,'recovered':recovered,'pending':pending,
+                    'revision':job['revision']}

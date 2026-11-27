@@ -20,7 +20,7 @@ _JOB_WRITES = {
     'checkpoint_job', 'claim_job', 'renew_claim', 'release_job', 'record_task_feedback', 'prepare_handoff', 'accept_handoff', 'mark_context_read',
     'request_publication', 'resolve_publication', 'checkout_draft', 'commit_draft',
     'save_scenario', 'apply_scenario', 'save_work_checkpoint', 'save_artifact', 'receive_source', 'write_work_file',
-    'publish_file', 'move_work_file', 'delete_work_file', 'record_sent',
+    'publish_file', 'move_work_file', 'delete_work_file', 'record_sent', 'recover_artifacts',
 }
 _PROJECT_OPERATIONS = {'get_project', 'update_project', 'append_timeline', 'initialize_project_git',
                        'save_memory_note', 'delete_memory_note'}
@@ -83,6 +83,10 @@ class Service:
             with w.lock('service-job:'+jid):
                 job=jobs.get(jid)
                 result=jobs.resume_record(job,detail=detail)
+                recovery=Artifacts(w).recovery_status(jid, job)
+                if recovery['recoverable'] or recovery['pending']:
+                    result['recovery']={**recovery,
+                        'next_action':dict(operation='recover_artifacts',jid=jid)}
                 result['work_context']=context.prepare_record(job,detail=detail)
                 result['scenarios'] = desktop.bindings(jid)
                 result['publication_decisions'] = {
@@ -117,7 +121,7 @@ class Service:
             return GitStore(w,args['project_id']).initialize()
         if operation=='read_memory_version':
             return retrieval.read_project_file(args['project_id'],'记忆/TIMELINE.md',args['commit'])
-        methods={'get_project':projects.get,'update_project':projects.update,'write_work_file':files.write,'publish_file':files.publish,'move_work_file':files.move,'delete_work_file':files.delete,'job_directories':files.directories,'claim_job':flow.claim,'renew_claim':flow.renew,'release_job':flow.release,'resolve_job':flow.resolve,'bind_session':flow.bind,'resume_session':resume_session,'prepare_handoff':flow.prepare_handoff,'read_handoff':flow.read_handoff,'accept_handoff':flow.accept_handoff,'append_timeline':timeline.append,'list_projects':w.project_query,'create_project':w.project_create,'update_index':retrieval.update,'search_sources':retrieval.search,'read_source':retrieval.read,'create_job':jobs.create,'list_jobs':jobs.query,'list_jobs_full':jobs.list,'resume_job':resume,'checkpoint_job':jobs.checkpoint,'record_task_feedback':jobs.record_feedback,'doctor':Maintenance(w).doctor,'report_issue':feedback.report_issue}
+        methods={'get_project':projects.get,'update_project':projects.update,'write_work_file':files.write,'publish_file':files.publish,'move_work_file':files.move,'delete_work_file':files.delete,'recover_artifacts':Artifacts(w).recover,'job_directories':files.directories,'claim_job':flow.claim,'renew_claim':flow.renew,'release_job':flow.release,'resolve_job':flow.resolve,'bind_session':flow.bind,'resume_session':resume_session,'prepare_handoff':flow.prepare_handoff,'read_handoff':flow.read_handoff,'accept_handoff':flow.accept_handoff,'append_timeline':timeline.append,'list_projects':w.project_query,'create_project':w.project_create,'update_index':retrieval.update,'search_sources':retrieval.search,'read_source':retrieval.read,'create_job':jobs.create,'list_jobs':jobs.query,'list_jobs_full':jobs.list,'resume_job':resume,'checkpoint_job':jobs.checkpoint,'record_task_feedback':jobs.record_feedback,'doctor':Maintenance(w).doctor,'report_issue':feedback.report_issue}
         methods.update(extra)
         for name in ('record_host_binding', 'list_host_bindings', 'request_publication', 'resolve_publication', 'list_decisions', 'record_sent', 'list_sent', 'read_sent_version',
                      'checkout_draft', 'commit_draft', 'list_scenarios',

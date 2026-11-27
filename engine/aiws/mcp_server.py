@@ -151,6 +151,11 @@ def delete_work_file(jid:str,project_id:str,relative:str,expected_hash:str|None=
     """Delete a draft or process file; published deliverables cannot be deleted. expected_hash is required."""
     return invoke('delete_work_file',dict(jid=jid,project_id=project_id,relative=relative,expected_hash=expected_hash,lease_token=lease_token))
 
+@server.tool()
+def recover_artifacts(jid:str,lease_token:str|None=None)->dict:
+    """Recover an intact file committed before its task artifact manifest was saved."""
+    return invoke('recover_artifacts',dict(jid=jid,lease_token=lease_token))
+
 
 @server.tool()
 def publish_file(jid:str,project_id:str,source:str,source_hash:str,name:str,expected_hash:str|None=None,confirm:bool=False,lease_token:str|None=None)->dict:
