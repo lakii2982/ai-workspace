@@ -49,6 +49,8 @@ def test_install_keeps_core_and_workspace_separate(tmp_path):
     assert install["doctor"] == "healthy" and install["mcp"] == "verified"
     assert install["clients"][0]["status"] == "awaiting_host_verification"
     assert install["clients"][0]["session_directories"] == [str(default), str(root)]
+    assert "open_work" in (root / "AGENTS.md").read_text()
+    assert not install["clients"][0].get("custom_instructions")
     root_market = json.loads((root / ".agents/plugins/marketplace.json").read_text())
     assert root_market["plugins"] == [{"name": "aiws", "source": {"source": "local", "path": "./Workspace/plugins/aiws"}, "category": "Productivity", "policy": {"installation": "AVAILABLE", "authentication": "ON_INSTALL"}}]
     config = tomllib.loads((default / ".codex" / "config.toml").read_text())
@@ -89,7 +91,10 @@ command = "existing"
 """)
     root_config.unlink()
     run("aiws", "project", "create", "--name", "默认数据")
-    run("install.sh", "--agent", "codex")
+    (root / "AGENTS.md").write_text("Existing root rules\n")
+    repeated=run("install.sh", "--agent", "codex")
+    assert repeated["clients"][0]["custom_instructions"] == [str(default),str(root)]
+    assert (root / "AGENTS.md").read_text()=="Existing root rules\n"
     assert notes.read_text() == "Existing user notes\n"
     assert rules.read_text() == "Existing custom rules\n"
     upgraded = tomllib.loads(config_path.read_text())["mcp_servers"]

@@ -14,7 +14,7 @@
 
 - Codex 在数据目录下写入 `.codex/config.toml`。默认的同级 `aiws_core/` 与 `Workspace/` 布局也在安装根目录注册同一个服务。Claude Code 使用数据目录内的 `.mcp.json`。服务通过核心目录的 `aiws --mcp` 启动，并通过 `AIWS_WORKSPACE` 绑定数据目录。客户端配置参考 [Codex MCP](https://developers.openai.com/codex/mcp) 和 [Claude Code MCP](https://code.claude.com/docs/en/mcp)。
 - 在 Codex 的绑定入口，`required = true` 要求核心在会话启动时连通。所有 AIWS 项目任务从其中一个绑定目录开会话，在会话内通过核心选择项目。已有会话、直接打开的项目子目录和其他 Codex 项目应先验证绑定。核心不可用时暂停任务。
-- 安装可以重复执行。安装器更新旧版默认 Agent 规则并保留用户自定义规则、已有文档和工具级审批设置。
+- 安装可以重复执行。安装器更新旧版默认 Agent 规则。在标准安装根目录首次生成一段指向工作空间的开工说明。已有自定义说明和审批设置均保留；安装回执的 custom_instructions 会列出需要启用 AIWS 插件或补充 open_work 约定的入口。
 - Python 或依赖安装失败时修复网络或代理后重试。CLI 报异常时用核心入口执行 `doctor`。MCP 启动失败时核对客户端配置中的核心入口与数据目录。
 - 移除工具时可以删除源码检出中的虚拟环境和对应 MCP 条目，资料仍位于独立工作空间。私有备份可能包含业务资料、项目 Git 历史和本地设置，保存在可信位置。
 - Windows 原生环境缺少本版使用的文件锁，使用 Linux 或 WSL 中的本地 Agent 和终端。飞书适配器保留供已有兼容环境使用，本地初始化无需启用它。
