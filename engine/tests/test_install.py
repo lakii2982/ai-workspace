@@ -46,6 +46,8 @@ def test_install_keeps_core_and_workspace_separate(tmp_path):
     assert install["workspace"] == str(default)
     assert install["doctor"] == "healthy" and install["mcp"] == "verified"
     assert install["clients"][0]["session_directories"] == [str(default), str(root)]
+    root_market = json.loads((root / ".agents/plugins/marketplace.json").read_text())
+    assert root_market["plugins"] == [{"name": "aiws", "source": {"source": "local", "path": "./Workspace/plugins/aiws"}, "category": "Productivity", "policy": {"installation": "AVAILABLE", "authentication": "ON_INSTALL"}}]
     config = tomllib.loads((default / ".codex" / "config.toml").read_text())
     server = {
         "command": str(core / "aiws"), "args": ["--mcp"], "env": {"AIWS_WORKSPACE": str(default)},
@@ -91,8 +93,10 @@ command = "existing"
     assert upgraded["other"] == {"command": "existing"}
     assert upgraded["aiws"]["tools"]["resume_job"]["approval_mode"] == "prompt"
     assert upgraded["aiws"]["tools"]["append_timeline"]["approval_mode"] == "approve"
+    assert upgraded["aiws"]["tools"]["open_work"]["approval_mode"] == "approve"
     assert upgraded["aiws"]["required"] is True
     assert tomllib.loads(root_config.read_text())["mcp_servers"]["aiws"] == upgraded["aiws"]
+    assert json.loads((root / ".agents/plugins/marketplace.json").read_text()) == root_market
 
     custom = root / "另外一个工作空间"
     install = run("install.sh", str(custom), "--agent", "claude")
