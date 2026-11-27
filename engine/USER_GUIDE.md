@@ -57,6 +57,7 @@ get_project_overview 提供任务分组与成果、问题、下一步；不会�
 3. 飞书模式开始写入先 `call claim_job`，参数jid/owner/revision，返回lease.token；后续checkpoint、保存文件带lease_token。认领30秒至2小时，到期前renew_claim。旧凭证被拒绝后重新恢复，不盲目重试。
 4. 新任务必须包含项目范围和稳定request_id。相同request_id重试不重复创建；同ID不同内容拒绝。
 5. `call bind_session`绑定session_id/jid，换客户端用resume_session恢复最新状态。不要把上次会话的文本当成最新事实。
+   一次性意见用 `record_task_feedback` 留在当前任务。跨任务有效的项目约定用 `save_memory_note` 保存为 `project` 或 `feedback` 条目。个人场景由 `save_scenario` 保存，与来源项目无绑定，可以在其他项目的新任务用 `apply_scenario` 固定版本。
 6. `call write_work_file`按jid/project_id/name/kind写工作稿或过程材料，旧文件必须带expected_hash。`call publish_file`须绑定source_hash和具体用户确认，旧成果进入同目录历史版本。没有成果表。
 7. 重要决策、范围变化和交付结果用append_timeline写入所属项目；必须提供事件日期、记录日期、性质、状态、影响、责任人、后续和来源，带旧hash；事件ID可安全重试。
 8. 完成任务先 review，再 completed。飞书模式必须给每条验收条件提供verification中的criterion/path/hash，且没有未解决阻塞。完成技术工作不代表用户已批准文件发布。交接用release_job并提供next_steps。

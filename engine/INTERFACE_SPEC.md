@@ -63,6 +63,7 @@ DELIVERABLE_REQUIRED：任务转completed时，若 工作/JOB/工作稿/ 仍有�
 - list_projects(query='',limit=20,offset=0)：items/has_more/next_offset。
 - create_job增加request_id；飞书启用后必须提供项目范围及request_id。重复请求复用同一任务。
 - checkpoint_job、save_artifact增加lease_token；飞书启用后必需。
+- record_task_feedback(jid,feedback,lease_token?)：记录只对当前任务有效的一次性用户意见，不写入项目记忆；相同文本重试返回 `replayed=true`。跨任务仍有效的项目约定继续使用 `save_memory_note(type='project' 或 'feedback')`。
 - claim_job(jid,owner,revision,ttl=1800)：返回lease.token及新revision。renew_claim(jid,revision,token,ttl)；release_job(jid,revision,token,next_steps)。TTL 30..7200秒。
 - resolve_job(project?,query='',jid?)：唯一时返回task；多匹配返回候选，不自动选择。
 - bind_session(session_id,jid)、resume_session(session_id)：绑定稳定任务身份，恢复读取远端最新状态。

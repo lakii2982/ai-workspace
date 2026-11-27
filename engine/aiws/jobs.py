@@ -183,6 +183,22 @@ class Jobs:
             if new in ('completed','cancelled'):j['lease']={}
             j['revision']+=1;j['updated_at']=now()
             return self.persist(j)
+
+    def record_feedback(self, jid, feedback, lease_token=None):
+        """Keep a user instruction on this task without promoting it to project memory."""
+        if not isinstance(feedback, str) or not feedback.strip() or len(feedback) > 2000:
+            raise Error('INVALID_ARGUMENT', 'Task feedback must be 1..2000 characters')
+        with self.w.lock('job:'+jid):
+            j=self.get(jid)
+            from .workflow import check_lease
+            from .remote_store import enabled
+            check_lease(j, lease_token, require=enabled(self.w))
+            text=feedback.strip()
+            if text in j['decisions']:
+                return dict(job_id=jid, feedback=text, scope='task', revision=j['revision'], replayed=True)
+            j['decisions'].append(text)
+            j['revision']+=1;j['updated_at']=now();self.persist(j)
+            return dict(job_id=jid, feedback=text, scope='task', revision=j['revision'])
     def resume(self,jid,detail="brief"):
         return self.resume_record(self.get(jid), detail)
 

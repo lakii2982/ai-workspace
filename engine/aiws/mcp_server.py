@@ -78,6 +78,10 @@ def checkpoint_job(jid:str,revision:int,patch:dict,reopen:bool=False,lease_token
     """Compare revision and persist checkpoint; explicit reopen required for completed work."""
     return invoke('checkpoint_job',dict(jid=jid,revision=revision,patch=patch,reopen=reopen,lease_token=lease_token))
 @server.tool()
+def record_task_feedback(jid:str,feedback:str,lease_token:str|None=None)->dict:
+    """Keep a one-time user instruction on this task only. Use project memory for enduring conventions."""
+    return invoke('record_task_feedback',dict(jid=jid,feedback=feedback,lease_token=lease_token))
+@server.tool()
 def save_artifact(jid:str,relative:str,content:str|None=None,content_base64:str|None=None,expected_hash:str|None=None,confirm:bool=False,purpose:str='draft',lease_token:str|None=None)->dict:
     """Save text/binary with expected SHA256. confirm=true only after actual user authorization to publish formal knowledge."""
     return invoke('save_artifact',dict(jid=jid,relative=relative,content=content,content_base64=content_base64,expected_hash=expected_hash,confirm=confirm,purpose=purpose,lease_token=lease_token))
