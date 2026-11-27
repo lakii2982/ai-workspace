@@ -1,8 +1,9 @@
 """Task ownership, deterministic resolution and durable session bindings."""
 import hashlib
+import re
 import time
 import uuid
-from .core import Error, now, put_json, load
+from .core import Error, digest, now, put_json, load
 from .jobs import Jobs
 
 class Workflow:
@@ -37,9 +38,20 @@ class Workflow:
     def resolve(self,project=None,query='',jid=None):
         if jid:return {'match':'unique','task':self.jobs.brief(jid)}
         if not project:raise Error('INVALID_SCOPE','Project name or ID required')
+        matches=self.project_matches(project)
+        if len(matches)!=1:return {'match':'ambiguous' if matches else 'none','projects':[{'project_id':p['project_id'],'name':p['name']} for p in matches[:20]]}
+        found=self.jobs.query(project_id=matches[0]['project_id'],query=query,limit=20)
+        if len(found['items'])==1 and not found['has_more']:return {'match':'unique','task':self.jobs.brief(found['items'][0]['job_id'])}
+        return {'match':'ambiguous' if found['items'] else 'none',**found}
+
+    def project_matches(self, project):
+        """Return exact ID/name/alias matches using the same local and remote rules."""
         from .remote_store import enabled,RemoteStore
-        if project.startswith('PRJ-'):
-            matches=[self.w.project_for(project)]
+        if project.upper().startswith('PRJ-'):
+            try:matches=[self.w.project_for(project.upper())]
+            except Error as error:
+                if error.code != 'INVALID_SCOPE':raise
+                matches=[]
         elif enabled(self.w):
             remote=RemoteStore(self.w);candidates={}
             for field,operator in [('项目名称','=='),('别名','intersects')]:
@@ -50,10 +62,7 @@ class Workflow:
             matches=[p for p in candidates.values() if project.casefold() in [x.casefold() for x in [p['name']]+p.get('aliases',[])]]
         else:
             matches=[p for p in self.w.projects() if project.casefold() in [x.casefold() for x in [p['project_id'],p['name']]+p.get('aliases',[])]]
-        if len(matches)!=1:return {'match':'ambiguous' if matches else 'none','projects':[{'project_id':p['project_id'],'name':p['name']} for p in matches[:20]]}
-        found=self.jobs.query(project_id=matches[0]['project_id'],query=query,limit=20)
-        if len(found['items'])==1 and not found['has_more']:return {'match':'unique','task':self.jobs.brief(found['items'][0]['job_id'])}
-        return {'match':'ambiguous' if found['items'] else 'none',**found}
+        return sorted(matches,key=lambda item:item['project_id'])
     def bind(self,session_id,jid):
         if not isinstance(session_id,str) or not 1<=len(session_id)<=200:raise Error('INVALID_ARGUMENT','Session ID required')
         job=self.jobs.get(jid)
@@ -67,6 +76,77 @@ class Workflow:
         if missing_ok and not path.exists():
             return None
         return load(path)['jid']
+
+    def prepare_handoff(self, jid, note, requested_agent='', independent_review=False):
+        if not isinstance(note, str) or not note.strip() or not isinstance(requested_agent, str) or type(independent_review) is not bool:
+            raise Error('INVALID_ARGUMENT', 'Handoff note and options are invalid')
+        job = self.jobs.get(jid)
+        from .context import Context
+        files=[];draft_candidates=[]
+        for pid in job['scope']['project_ids']:
+            project=self.w.project_for(pid)
+            draft=Context(self.w).primary_draft(project,job,None)
+            if draft and draft.get('path'):
+                relative=project['path']+'/'+draft['path']
+                target=self.w.path(relative)
+                self.w.allowed(relative,job['scope'],drafts=True)
+                if target.is_file():
+                    files.append({'project_id':pid,'path':relative,'hash':digest(target)})
+            elif draft and draft.get('state')=='ambiguous':
+                candidates=[]
+                for item in draft['candidates']:
+                    path=item['path']
+                    candidates.append({**item, 'read':dict(operation='read_project_file', project_id=pid,
+                                                          path=path)})
+                draft_candidates.append(dict(project_id=pid, candidates=candidates, hint=draft['hint'],
+                                             context=dict(operation='prepare_work_context', project_id=pid,
+                                                          jid=jid, detail='full')))
+        handoff_id = uuid.uuid4().hex
+        record = dict(schema_version=1, handoff_id=handoff_id, jid=jid, note=note.strip(),
+                      requested_agent=requested_agent.strip() or None,
+                      independent_review=independent_review, created_at=now(), status='prepared',
+                      task=self.jobs.brief_record(job),files=files,
+                      draft_candidates=draft_candidates,
+                      resume=dict(operation='resume_job', jid=jid))
+        path = self.w.path(f'.workspace/handoffs/{jid}/{handoff_id}.json')
+        put_json(path, record)
+        return {**record, 'handoff':dict(status='prepared',
+                reason='No receiving session has claimed this handoff',
+                fallback='continue_with_current_agent' if not independent_review else 'wait_for_independent_reviewer')}
+
+    def read_handoff(self, jid, handoff_id):
+        path = self.w.path(f'.workspace/handoffs/{jid}/{self._handoff_id(handoff_id)}.json')
+        return load(path)
+
+    def accept_handoff(self, jid, handoff_id, session_id):
+        if not isinstance(session_id, str) or not session_id:
+            raise Error('INVALID_ARGUMENT', 'Receiving session ID required')
+        if self.session_job_id(session_id, missing_ok=True) != jid:
+            raise Error('INVALID_STATE', 'Receiving session is not bound to this task')
+        path = self.w.path(f'.workspace/handoffs/{jid}/{self._handoff_id(handoff_id)}.json')
+        record = load(path)
+        if record['status'] in ('claimed_by_bound_session', 'human_acknowledged'):
+            return record
+        record.update(status='claimed_by_bound_session', claimed_at=now(), receiving_session=session_id)
+        put_json(path, record)
+        return record
+
+    def acknowledge_handoff(self, jid, handoff_id, note, confirm=False):
+        if confirm is not True or not isinstance(note, str) or not note.strip():
+            raise Error('CONFIRMATION_REQUIRED', 'Explicit human acknowledgement is required')
+        path = self.w.path(f'.workspace/handoffs/{jid}/{self._handoff_id(handoff_id)}.json')
+        record = load(path)
+        if record['status'] == 'human_acknowledged':
+            return record
+        record.update(status='human_acknowledged', acknowledged_at=now(), acknowledgement=note.strip())
+        put_json(path, record)
+        return record
+
+    @staticmethod
+    def _handoff_id(handoff_id):
+        if not isinstance(handoff_id, str) or not re.fullmatch(r'[0-9a-f]{32}', handoff_id):
+            raise Error('INVALID_ARGUMENT', 'Invalid handoff ID')
+        return handoff_id
 
 def check_lease(j,token,require=False):
     lease=j.get('lease',{})

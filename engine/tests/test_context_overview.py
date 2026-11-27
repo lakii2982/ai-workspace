@@ -33,3 +33,21 @@ def test_multi_project_task_does_not_guess_project(tmp_path):
        project_ids=[a['project_id'],b['project_id']],topic_ids=[]))
     response=Context(w).prepare(jid=j['job_id'])
     assert response['project_candidates']==[a['project_id'],b['project_id']]
+
+
+def test_overview_keeps_review_work_ahead_of_recent_history(tmp_path):
+    w=Workspace(tmp_path);w.init();p=w.project_create('待审优先')
+    scope=dict(include_company=False,include_professional=False,project_ids=[p['project_id']],topic_ids=[])
+    jobs=Jobs(w)
+    review=jobs.create('请确认报价','等待用户确认',scope)
+    jobs.checkpoint(review['job_id'], review['revision'], {'status':'in_progress'})
+    review=jobs.get(review['job_id'])
+    jobs.checkpoint(review['job_id'], review['revision'], {'status':'review'})
+    seed=jobs.get(review['job_id'])
+    for number in range(2, 14):
+        put_json(jobs.file(f'JOB-{number:04}'), {**seed, 'job_id':f'JOB-{number:04}',
+                 'title':f'历史{number}', 'status':'completed',
+                 'updated_at':f'2026-12-{number:02}T00:00:00+00:00'})
+    view=Context(w).overview(p['project_id'])
+    assert view['tasks'][0]['job_id'] == review['job_id']
+    assert view['tasks'][0]['status'] == 'review'

@@ -6,7 +6,7 @@
 
 在项目范围内运行 `./aiws call initialize_project_git --params '{"project_id":"PRJ-0001"}'` 启用项目独立版本库。框架源码仓库不承载业务文件；无远端也可使用。
 
-Agent 开始工作先定位并恢复已有任务。resume_job/resume_session 直接返回当前任务的工作位置、检查点和下一步。已纳管的单项目任务会提示哪些已读资料有变化。快速接续不刷新索引；需要完整项目概览或按意图查资料时，再调用 prepare_work_context(jid=..., intent='选型 维护')。未启用 Git 的项目仍可恢复进度，但不会被标为已检查资料版本。
+Agent 开始工作先定位并恢复已有任务。resume_job/resume_session 直接返回当前任务的工作位置、检查点和下一步。默认接续会限制记忆条目数量，并在 `memory.resume_budget` 明示总数与省略数，`progress` 保留主稿与未完事项，`attention` 优先显示待审和阻塞计数。需要完整项目概览或按意图查资料时，再调用 prepare_work_context(jid=..., intent='选型 维护')。未启用 Git 的项目仍可恢复进度，但不会被标为已检查资料版本。
 
 手改文件或丢入新资料后不需要先提交；系统比较阶段快照与当前目录。调用 read_project_file(project_id,path,commit=observation.commit) 阅读观察版本；path 是项目相对路径，含工作稿与未登记资料。compare_project_file 可提取旧新版办公文档文本差异。不支持的格式返回明确可读性结果。
 
@@ -27,6 +27,8 @@ Git 版本与工作区以磁盘已保存内容为准。ignored 文件、嵌套�
 
 get_project_overview 提供任务分组与成果、问题、下一步；不会把任务完成比例当成项目完成度。prepare 的 brief 若有省略，按 expand 取 full；Agent 仍须阅读需要修改的正文，不能只看摘要。
 
+项目概览优先展示待验收任务，其次才是阻塞、进行中和新任务。任务有发布确认事项时，待确认项优先于已退回或已处理项。已完成或已取消任务不占用当前工作的摘要名额，但仍可通过 `list_jobs(status='completed')` 定位。
+
 告诉 Agent 你的目标和项目名称即可；Agent 负责查项目、绑定范围、查证来源和持久化任务。不要依赖聊天记录保存进度。
 
 原件放在项目的资料目录。公司知识放已确认企业事实；专业知识放方法与模板；工作草稿不进入默认检索。当前不自动判断事实是否过期，引用时必须核查生效日期、批准状态和冲突版本。
@@ -44,6 +46,8 @@ get_project_overview 提供任务分组与成果、问题、下一步；不会�
 
 正式发布前由 Agent 展示具体成果供确认。普通草稿保存在本任务工作目录，旧 hash 不匹配时拒绝覆盖；候选内容保留在 .workspace/history/conflicts。历史原内容保存在 .workspace/history/files，可查事件记录定位。
 
+附件无需转成聊天文本或 Base64。员工将附件上传到 `checkout_draft` 返回的本任务工作副本，再调用 `receive_source(jid, project_id, name, copy_id=...)`；实际字节会直接落入项目 `资料/` 成为 original，随后可由 `search_sources` 检索，且不会伪造一份工作稿。`commit_draft` 只用于真正的工作稿。该路径逐项校验任务、项目、文件名及副本位置，不读取任意本机路径。MCP 与 CLI 的大内容参数走标准输入，CLI 使用 `--params -` 从 stdin 读取 JSON，避免把正文放进命令行。
+
 复杂跨项目工作可在 scope.project_ids 显式绑定多个项目；当前跨项目专题独立身份尚未实现，topic_ids 必须为空。
 
 ## 框架演进版：日常执行协议
@@ -55,6 +59,8 @@ get_project_overview 提供任务分组与成果、问题、下一步；不会�
 3. 飞书模式开始写入先 `call claim_job`，参数jid/owner/revision，返回lease.token；后续checkpoint、保存文件带lease_token。认领30秒至2小时，到期前renew_claim。旧凭证被拒绝后重新恢复，不盲目重试。
 4. 新任务必须包含项目范围和稳定request_id。相同request_id重试不重复创建；同ID不同内容拒绝。
 5. `call bind_session`绑定session_id/jid，换客户端用resume_session恢复最新状态。不要把上次会话的文本当成最新事实。
+   一次性意见用 `record_task_feedback` 留在当前任务。跨任务有效的项目约定用 `save_memory_note` 保存为 `project` 或 `feedback` 条目，失效时用 `delete_memory_note` 撤销。项目约定不跨项目继承。个人场景由 `save_scenario` 保存，与来源项目无绑定，可以在其他项目的新任务用 `apply_scenario` 固定版本。
+   要求其他 Agent 或独立复核时，先 `prepare_handoff` 生成带主稿路径、文件指纹与复核说明的接续包。未有接收会话时，它只会显示待认领和当前 Agent 继续的回退方案。接收方绑定同一任务后调用 `accept_handoff`，只记录受管会话认领。人工明确说已接收时才以 `acknowledge_handoff` 单独留痕，两者都不代表外部渠道送达。
 6. `call write_work_file`按jid/project_id/name/kind写工作稿或过程材料，旧文件必须带expected_hash。`call publish_file`须绑定source_hash和具体用户确认，旧成果进入同目录历史版本。没有成果表。
 7. 重要决策、范围变化和交付结果用append_timeline写入所属项目；必须提供事件日期、记录日期、性质、状态、影响、责任人、后续和来源，带旧hash；事件ID可安全重试。
 8. 完成任务先 review，再 completed。飞书模式必须给每条验收条件提供verification中的criterion/path/hash，且没有未解决阻塞。完成技术工作不代表用户已批准文件发布。交接用release_job并提供next_steps。
@@ -72,6 +78,10 @@ get_project_overview 提供任务分组与成果、问题、下一步；不会�
 移交门槛（全部满足才发布）：脱稿可独立阅读；无 TODO/待补/占位符；内容冻结，后续修改走新版本号；关键事实有出处；用户对具体这一版确认；文件名为 `主题_v主.次`，不带"终版/最新"。
 
 发布用 `publish_file`（source 为工作稿路径 + source_hash + confirm=true + lease_token）。任务完成时入口校验：工作稿仍有文件而成果目录为空返回 `DELIVERABLE_REQUIRED`；定稿发布到成果，不交付的移入过程材料。无文件任务（决策、排障）不受此限。存量任务不自动回溯：已关闭任务做存量迁移时直接对 成果/ 调用 `publish_file`（confirm=true 留痕、无需租约、不重开任务）；其他写入仍要求租约。
+
+### 定稿与已发
+
+`publish_file` 只表示定稿已经进入成果目录。员工明确表示已经发出后，才用 `record_sent` 记录该成果的 `source_hash`，没有链接也可以记录为用户陈述。若已有渠道回执，将回执文件放入项目资料并传其路径与 hash，才会标为 `channel_receipt`。渠道名或任意字符串本身不构成外部核实。定稿与历史发送记录给出可打开的版本路径。确认过的旧版可在后续改版后补记发送。它不会主动发送或访问渠道，改版后应对新 hash 另记一条，不能把旧版已发泛化成新版已发。
 
 不交付的稿子用 `move_work_file` 移入 `过程材料/`（字节不变，需要当前 hash），删除工作稿用 `delete_work_file`（旧字节进入历史）。两者都拒绝存在未提交 checkout 或待决发布的文件；成果正本不能删除，改版请发布新版本。
 

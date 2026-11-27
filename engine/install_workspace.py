@@ -23,6 +23,9 @@ PREVIOUS_RULES = {
     '9d774687bddf22119bd79c0f6c25a190dab1e9939559799cb8d158813c3ae65c',
     '296512125e5d83b55163c9e35ccc3b232f5c60b2ed791f050a2efde37fdc23e3',
     'd019da8eaf65054ad14618816bd163a1dbdb3a54578555408e59b022d6a60a39',
+    '5c15bbe2d0d763e6706e0c5d0ab6c0717fefd1fcec3076b7e647c60565348e24',
+    '441c79f9f7cbb9c2ea5acee97b5c4cbaa35820ccd2d53160afb084f5a091fbdc',
+    'f7fe38b67f8f2133e25f9b9ab39ca8987e5f38aabd29742de9d23084f6874832',
 }
 
 
@@ -61,6 +64,12 @@ def uses_working_legacy_launcher(existing, workspace: Path, **fields) -> bool:
     return legacy.read_text(encoding="utf-8") == old_launcher
 
 
+ROOT_ENTRY_RULES = """# AI Workspace
+
+在此目录处理项目工作和查询项目资料，先调用 AIWS MCP 的 `open_work`。归属不明时只问项目；回答后承接原始需求。业务资料通过已绑定的 AIWS 操作，详细约定在 `Workspace/AGENTS.md`。普通问答可直接回答。
+"""
+
+
 def client_config(workspace: Path, launcher: Path, agent: str):
     server = {"command": str(launcher), "args": ["--mcp"], "env": {"AIWS_WORKSPACE": str(workspace)}}
     if agent == "codex":
@@ -75,6 +84,9 @@ def client_config(workspace: Path, launcher: Path, agent: str):
             modes = {tool: options["approval_mode"] for tool, options in config.get("tools", {}).items()
                      if "approval_mode" in options}
             codex_config(root / ".codex" / "config.toml", server, tool_defaults=modes)
+            root_rules = root / "AGENTS.md"
+            if not root_rules.exists():
+                write_file(root_rules, ROOT_ENTRY_RULES)
             directories.append(root)
         return directories
     elif agent == "claude":
@@ -155,6 +167,11 @@ def install(workspace: Path, agent: str) -> None:
                 result = configure(client, workspace, launcher, activate=True, source=source)
                 if directories:
                     result["session_directories"] = [str(path) for path in directories]
+                    custom = [str(path) for path in directories
+                              if "open_work" not in (path / "AGENTS.md").read_text(encoding="utf-8")]
+                    if custom:
+                        result["custom_instructions"] = custom
+                        result["action"] += "。这些目录保留了自定义规则；启用 AIWS 插件，或在自定义规则中指定项目工作先调用 open_work"
                 desktop_results.append(result)
         except (OSError, ValueError, subprocess.SubprocessError) as exc:
             desktop_results.append(dict(client=client, status='blocked', detail=str(exc)))

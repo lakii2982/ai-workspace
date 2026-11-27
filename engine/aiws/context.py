@@ -7,18 +7,28 @@ from .memories import Memories
 
 
 class Context:
+    RESUME_MEMORY_ITEMS = 12
+    RESUME_PENDING_REVIEW = 8
+    RESUME_EVENTS = 8
     def __init__(self, workspace):
         self.w = workspace
 
     def tasks(self, project_id):
         jobs = Jobs(self.w)
-        result, offset = [], 0
-        while True:
-            page = jobs.query(project_id=project_id, status=None, limit=100, offset=offset)
-            result.extend(jobs.get(row['job_id']) for row in page['items'])
-            if not page['has_more']:
-                return result
-            offset = page['next_offset']
+        from .remote_store import enabled
+        # Remote authority keeps its paged query semantics.  The local scan
+        # optimization must not turn an overview into one remote read per job.
+        if enabled(self.w):
+            result, offset = [], 0
+            while True:
+                page=jobs.query(project_id=project_id,status=None,limit=100,offset=offset)
+                result.extend(jobs.get(row['job_id']) for row in page['items'])
+                if not page['has_more']:return result
+                offset=page['next_offset']
+        # An overview requires complete records. Repeated query pages would
+        # rescan all job JSON files and then reread their selected records.
+        records, _ = jobs.scan()
+        return [job for job in records if project_id in job['scope']['project_ids']]
 
     def memories(self, project_id, **filters):
         from .timeline import Timeline
@@ -45,6 +55,25 @@ class Context:
         result['expand_note']='Use prepare_work_context(detail=full) or read_project_memory for original text and sources'
         return result
 
+    @classmethod
+    def resume_memory_view(cls, data):
+        """Bound the default resume response and make every omission visible."""
+        if not (data.get('total') or data.get('pending_review') or data.get('events_total') or data.get('legacy')):
+            return {'items':[], 'resume_budget':{'totals':{},'omitted':{},
+                    'expand':{'operation':'prepare_work_context','detail':'full'}}}
+        result=cls.memory_view(data, 'brief')
+        totals={'items':data.get('total', len(result.get('items', []))),
+                'pending_review':len(result.get('pending_review', [])),
+                'events':data.get('events_total', len(result.get('events', [])))}
+        limits={'items':cls.RESUME_MEMORY_ITEMS,'pending_review':cls.RESUME_PENDING_REVIEW,
+                'events':cls.RESUME_EVENTS}
+        for key,limit in limits.items():
+            result[key]=result.get(key, [])[:limit]
+        result['resume_budget']={'limits':limits,'totals':totals,
+            'omitted':{key:max(0, totals[key]-limit) for key,limit in limits.items()},
+            'expand':{'operation':'prepare_work_context','detail':'full'}}
+        return result
+
     def overview(self, project_id, detail='brief'):
         from .timeline import Timeline
         if detail not in ('brief', 'full'):
@@ -52,7 +81,9 @@ class Context:
         p = self.w.project_for(project_id)
         jobs = self.tasks(project_id)
         counts = dict(Counter(j['status'] for j in jobs))
-        order = {'in_progress': 0, 'review': 1, 'blocked': 2, 'new': 3}
+        # A pending acceptance is more urgent than the newest ongoing work. Completed
+        # history is excluded before this ordering, so it cannot hide a review item.
+        order = {'review': 0, 'blocked': 1, 'in_progress': 2, 'new': 3}
         active = sorted((j for j in jobs if j['status'] in order),
                         key=lambda j: j['updated_at'], reverse=True)
         active.sort(key=lambda j: order[j['status']])
@@ -96,11 +127,11 @@ class Context:
         j = Jobs(self.w).get(jid) if jid else None
         return self._prepare(project_id, j, intent, detail, targeted=False)
 
-    def prepare_record(self, j, detail='brief'):
+    def prepare_record(self, j, detail='brief', project_id=None):
         """Resume directly from one authoritative job, without a project task rollup."""
         if detail not in ('brief', 'full'):
             raise Error('INVALID_ARGUMENT', 'detail must be brief or full')
-        return self._prepare(None, j, '', detail, targeted=True)
+        return self._prepare(project_id, j, '', detail, targeted=True)
 
     def _prepare(self, project_id, j, intent, detail, *, targeted):
         from .git_store import GitStore
@@ -114,6 +145,13 @@ class Context:
                                 context=ctx, completed=j['completed'][-3:] if detail=='brief' else j['completed'],
                                 next_steps=j['next_steps'], open_issues=j['open_issues'],
                                 local_decisions=j['decisions'], artifacts=j['artifacts'])
+            if detail=='brief':
+                omitted={}
+                for key in ('next_steps','open_issues','local_decisions','artifacts'):
+                    values=task_context[key]
+                    if len(values)>8:omitted[key]=len(values)-8
+                    task_context[key]=values[:8]
+                if omitted:task_context['omitted']=omitted
             ids = j['scope']['project_ids']
             if project_id and project_id not in ids:
                 raise Error('INVALID_SCOPE', 'Project outside task')
@@ -191,8 +229,11 @@ class Context:
                                                 path=path, commit=observation['commit'])))
         else:
             status = git.inspect()
-        # Constraints are never lost behind pagination or relevance ranking.
-        memory = self.memories(project_id)
+        # Resume is deliberately bounded. Broad project research remains an
+        # explicit prepare_work_context call, so a long timeline cannot bloat
+        # every new chat.
+        memory = (Timeline(self.w).list_memory(project_id, limit=self.RESUME_MEMORY_ITEMS)
+                  if targeted and detail=='brief' else self.memories(project_id))
         references=[]
         for event_id in ctx.get('memory_refs',[]):
             try:
@@ -208,7 +249,7 @@ class Context:
                 keywords.append(term)
         related = Timeline(self.w).list_memory(project_id,query=' '.join(keywords),limit=20) if keywords else None
         draft = self.primary_draft(p, j, observation) if j else None
-        if draft:
+        if draft and draft.get('path'):
             primary.add(draft['path'])
         pending_updates=[] if status.get('enabled') else ['Project Git is not initialized']
         if observation:
@@ -235,11 +276,22 @@ class Context:
                 nested=public_observation.get('unsupported_repositories',[])
                 public_observation={**public_observation,'unsupported_repositories':nested[:3],
                                     'total_unsupported_repositories':len(nested)}
+        progress=dict(working_on=ctx.get('working_on',''), resume_note=ctx.get('resume_note',''),
+                      next_steps=task_context['next_steps'] if task_context else [],
+                      open_issues=task_context['open_issues'] if task_context else [])
+        attention=dict(pending_review_total=len(memory.get('pending_review',[])),
+                       unresolved_issue_total=len(j['open_issues']) if j else 0)
+        lanes={}
+        if any(progress.values()):lanes['progress']=progress
+        if any(attention.values()):lanes['attention']=attention
         return dict(identity=dict(project_id=project_id, jid=jid), project_brief=overview,
                     task_context=task_context, git_status=status, observation=public_observation,
                     primary_draft=draft, changed_reviewed_files=changed_reviewed,
                     index=index_report,
-                    git_changes=changes, memory=self.memory_view(memory,detail), memory_references=references,
+                    **lanes,
+                    git_changes=changes,
+                    memory=(self.resume_memory_view(memory) if targeted and detail=='brief'
+                            else self.memory_view(memory,detail)), memory_references=references,
                     memory_notes=Memories(self.w).overview(project_id, 'full' if detail=='full' else 'index'),
                     related_memory=self.memory_view(related,detail) if related else None,
                     reading_queue=queue[:20] if detail=='brief' else queue,
@@ -256,8 +308,11 @@ class Context:
             marked = [self.relative_file(project, a['path']) for a in job['artifacts']
                       if a['path'].startswith(project['path']+'/'+folder)]
         paths = set(marked)
-        if len(paths) != 1:
+        if not paths:
             return None
+        if len(paths) > 1:
+            return dict(state='ambiguous', candidates=[dict(path=path) for path in sorted(paths)],
+                        hint='Several draft candidates are marked; choose one explicitly before resuming it')
         path = paths.pop()
         if observation:
             return dict(path=path, state='available' if path in observation['files'] else 'missing',

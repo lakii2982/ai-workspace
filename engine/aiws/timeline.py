@@ -70,7 +70,7 @@ class Timeline:
                     raise Error('CONFLICT', 'Event ID already recorded with different content; use a new event ID')
                 return {'path': relative, 'hash': digest(path), 'replayed': True}
             if (digest(path) if path.exists() else None) != expected_hash:
-                raise Error('CONFLICT', 'Timeline changed')
+                raise Error('CONFLICT', 'Timeline changed. Read 记忆/TIMELINE.md with read_project_file and retry with its sha256 as expected_hash.')
             if memory and memory['supersedes']:
                 known = set(re.findall(r'<!-- event:([\w-]+) ', old))
                 if not set(memory['supersedes']) <= known:

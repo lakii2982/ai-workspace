@@ -111,3 +111,25 @@ def test_resume_in_local_mode_without_git_still_returns_task_state(tmp_path):
     assert result["work_context"]["primary_draft"]["path"].endswith("/draft.md")
     assert result["work_context"]["primary_draft"]["state"] == "not_checked"
     assert not result["work_context"]["git_status"]["enabled"]
+
+
+def test_resume_lists_equal_primary_draft_candidates_without_guessing(tmp_path):
+    w=Workspace(tmp_path);w.init();project=w.project_create('Two drafts')
+    pid=project['project_id'];scope=dict(include_company=False, include_professional=False,
+                                         project_ids=[pid], topic_ids=[])
+    job=Jobs(w).create('报价','选择主稿',scope)
+    folder=w.path(project['path']+'/工作/'+job['directory_name']+'/工作稿')
+    folder.mkdir(parents=True)
+    first=folder/'报价-客户甲.html';second=folder/'报价-客户乙.html'
+    first.write_text('<h1>客户甲</h1>');second.write_text('<h1>客户乙</h1>')
+    job=Jobs(w).checkpoint(job['job_id'],job['revision'],{'context':{'working_files':[
+        {'path':first.relative_to(w.path(project['path'])).as_posix(),'role':'primary_draft'},
+        {'path':second.relative_to(w.path(project['path'])).as_posix(),'role':'primary_draft'},
+    ]}})
+    draft=Service(tmp_path).call('resume_job',{'jid':job['job_id']})['work_context']['primary_draft']
+    assert draft['state']=='ambiguous'
+    assert [item['path'] for item in draft['candidates']]==sorted([
+        first.relative_to(w.path(project['path'])).as_posix(),
+        second.relative_to(w.path(project['path'])).as_posix(),
+    ])
+    assert 'choose one explicitly' in draft['hint']

@@ -5,7 +5,7 @@ from concurrent.futures import ThreadPoolExecutor
 
 import pytest
 
-from aiws.core import Workspace, digest, put_json
+from aiws.core import Error, Workspace, digest, put_json
 from aiws.git_store import GitStore
 from aiws.retrieval import Retrieval
 
@@ -80,6 +80,32 @@ def test_legacy_index_refresh_recovers_and_prunes(tmp_path):
     assert not r.search('expired',scope)['matches']
     assert r.search('live',scope)['matches']
     assert r.update(scope)['changed_files']==0
+
+
+def test_existing_unsupported_html_cache_reparses_after_html_support_upgrade(tmp_path, monkeypatch):
+    w=Workspace(tmp_path);w.init();project=w.project_create('旧报价')
+    scope=project_scope(project)
+    quote=w.path(project['path']+'/资料/报价单.html')
+    quote.write_text('<html><head><title>旧报价单</title></head><body><table>'
+                     '<tr><td>含税金额</td><td>12800</td></tr>'
+                     '<tr><td>交期</td><td>15个工作日</td></tr></table></body></html>')
+    unchanged=quote.stat()
+    r=Retrieval(w);extract=r._extract_bytes
+
+    def old_parser(content, suffix):
+        if suffix=='.html':
+            raise Error('PARSE_UNSUPPORTED','Old index did not read HTML')
+        return extract(content,suffix)
+
+    monkeypatch.setattr(r,'_extract_bytes',old_parser)
+    first=r.update(scope)
+    assert first['failures']==[{'path':quote.relative_to(w.root).as_posix(),'code':'PARSE_UNSUPPORTED'}]
+    monkeypatch.setattr(r,'_extract_bytes',extract)
+    recovered=r.update(scope,strict=False)
+    assert recovered['changed_files']==1
+    assert quote.stat().st_size==unchanged.st_size and quote.stat().st_mtime_ns==unchanged.st_mtime_ns
+    assert r.search('12800',scope)['matches']
+    assert r.search('15个工作日',scope)['matches']
 
 
 def test_blocked_parser_does_not_block_another_root(tmp_path, monkeypatch):

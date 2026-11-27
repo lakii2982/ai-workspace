@@ -4,12 +4,101 @@ import sqlite3
 from pathlib import Path
 import tempfile
 import difflib
+import re
+from html.parser import HTMLParser
 from .core import Error, now, load
+
+
+def _clean_html_text(parts):
+    return re.sub(r'\s+', ' ', ''.join(parts)).strip()
+
+
+class _HTMLExtractor(HTMLParser):
+    """Extract visible HTML text only; this parser never loads or executes markup."""
+    def __init__(self):
+        super().__init__(convert_charrefs=True)
+        self.out=[];self.ignored=0;self.in_head=0;self.in_title=0;self.title=[];self.headings=[]
+        self.body=[];self.tables=[];self.cells=[]
+        self.title_count=0;self.heading_counts={};self.table_count=0
+
+    def handle_starttag(self, tag, attrs):
+        tag=tag.lower()
+        if tag in ('script','style'):
+            self.ignored+=1;return
+        if self.ignored:return
+        if tag=='head':self.in_head+=1
+        elif tag=='title':self.in_title+=1;self.title=[]
+        elif tag in ('h1','h2','h3','h4','h5','h6'):
+            self.headings.append((tag,[]))
+        elif tag=='table':
+            self.table_count+=1;self.tables.append({'number':self.table_count,'row':0,'cell':0})
+        elif tag=='tr' and self.tables:
+            self.tables[-1]['row']+=1;self.tables[-1]['cell']=0
+        elif tag in ('td','th') and self.tables:
+            table=self.tables[-1];table['cell']+=1
+            self.cells.append((table['number'],table['row'],table['cell'],[]))
+        elif tag=='br':
+            self._append('\n')
+
+    def handle_endtag(self, tag):
+        tag=tag.lower()
+        if tag in ('script','style'):
+            if self.ignored:self.ignored-=1
+            return
+        if self.ignored:return
+        if tag=='head':self.in_head=max(0,self.in_head-1)
+        elif tag=='title':
+            text=_clean_html_text(self.title)
+            if text:
+                self.title_count+=1;self.out.append((f'html:title:{self.title_count}',text))
+            self.title=[]
+            self.in_title=max(0,self.in_title-1)
+        elif tag in ('h1','h2','h3','h4','h5','h6') and self.headings:
+            level,parts=self.headings.pop();text=_clean_html_text(parts)
+            if text:
+                self.heading_counts[level]=self.heading_counts.get(level,0)+1
+                self.out.append((f'heading:{level}:{self.heading_counts[level]}',text))
+        elif tag in ('td','th') and self.cells:
+            number,row,cell,parts=self.cells.pop();text=_clean_html_text(parts)
+            if text:
+                self.out.append((f'table:{number}/row:{row}/cell:{cell}',text))
+        elif tag=='table' and self.tables:
+            self.tables.pop()
+
+    def handle_data(self, data):
+        if not self.ignored:
+            self._append(data)
+
+    def _append(self, data):
+        if self.in_title:self.title.append(data)
+        if self.headings:self.headings[-1][1].append(data)
+        if self.cells:self.cells[-1][3].append(data)
+        if not self.in_head:self.body.append(data)
+
+    def chunks(self):
+        body=_clean_html_text(self.body)
+        return self.out + ([('html:body:1',body)] if body else [])
+
+
+def extract_html(path):
+    try:
+        text=path.read_text(encoding='utf-8-sig')
+    except UnicodeDecodeError as error:
+        raise Error('PARSE_LIMITED','HTML is not UTF-8 text') from error
+    parser=_HTMLExtractor()
+    try:
+        parser.feed(text);parser.close()
+    except Exception as error:
+        raise Error('PARSE_ERROR','Malformed HTML could not be read') from error
+    return parser.chunks()
+
 
 def extract(path):
     ext=path.suffix.lower()
     if ext in ('.md','.txt'):
         return [(f'line:{i}',line) for i,line in enumerate(path.read_text(encoding='utf-8-sig').splitlines(),1) if line.strip()]
+    if ext in ('.html','.htm'):
+        return extract_html(path)
     if ext=='.docx':
         from docx import Document
         doc=Document(path)
@@ -137,6 +226,8 @@ class Retrieval:
                 continue
             seen.add(rel)
             before=cached.get(rel)
+            retry_html = (Path(rel).suffix.lower() in ('.html', '.htm') and before
+                          and before['error'] == 'PARSE_UNSUPPORTED')
             rows=[];status=None;code=None
             try:
                 path=self.w.path(rel)
@@ -147,7 +238,8 @@ class Retrieval:
                     signature = f'{stat.st_dev}/{stat.st_ino}/{stat.st_size}/{stat.st_mtime_ns}/{stat.st_ctime_ns}'
                     if (not strict and before and before['signature'] == signature
                             and before['version'] and not before['version'].startswith('git:')
-                            and before['error'] in (None, 'PARSE_UNSUPPORTED', 'PARSE_LIMITED')):
+                            and before['error'] in (None, 'PARSE_UNSUPPORTED', 'PARSE_LIMITED')
+                            and not retry_html):
                         version = before['version']
                     else:
                         content = path.read_bytes()
@@ -164,7 +256,7 @@ class Retrieval:
                     if before['error'] is None:
                         if before['status']!=status:status_updates.append((status,rel))
                         continue
-                    if before['error'] in ('PARSE_UNSUPPORTED','PARSE_LIMITED'):
+                    if before['error'] in ('PARSE_UNSUPPORTED','PARSE_LIMITED') and not retry_html:
                         failures.append({'path':rel,'code':before['error']})
                         continue
                     # Transient I/O or runtime failures should not hide a
@@ -214,7 +306,13 @@ class Retrieval:
         from .git_store import GitStore
         project=self.w.project_for(project_id)
         relative=Path(path)
-        if relative.is_absolute() or '..' in relative.parts:raise Error('OUT_OF_ROOT','Project-relative path required')
+        if '..' in relative.parts:raise Error('OUT_OF_ROOT','Path must stay in the selected project')
+        if relative.is_absolute():
+            try: relative=relative.resolve().relative_to(self.w.path(project['path']))
+            except ValueError:raise Error('OUT_OF_ROOT','File is outside the selected project') from None
+        elif relative.parts[:1]==('项目',):
+            try: relative=relative.relative_to(project['path'])
+            except ValueError:raise Error('INVALID_SCOPE','File belongs to another project') from None
         target=self.w.path(project['path']+'/'+relative.as_posix())
         git=GitStore(self.w,project_id)
         version=commit
@@ -224,7 +322,8 @@ class Retrieval:
         else:
             if not target.is_file():raise Error('NOT_FOUND','Project file missing')
             content=target.read_bytes()
-        result={'project_id':project_id,'path':relative.as_posix(),'source_path':project['path']+'/'+relative.as_posix(),'commit':version}
+        result={'project_id':project_id,'path':relative.as_posix(),'source_path':project['path']+'/'+relative.as_posix(),'commit':version,
+                'sha256':hashlib.sha256(content).hexdigest()}
         try:
             chunks=self._extract_bytes(content,target.suffix)
             return {**result,'readability':'readable','chunks':[{'locator':loc,'text':text} for loc,text in chunks],'text':'\n'.join(text for _,text in chunks)}
@@ -258,12 +357,14 @@ class Retrieval:
             else:
                 rows=db.execute('SELECT * FROM sources WHERE '+clause+' AND (instr(lower(snippet),lower(?))>0 OR instr(lower(title),lower(?))>0) LIMIT ?',args+[query,query,min(max(int(limit),1),100)]).fetchall()
         return {'matches':[dict(r) for r in rows],'index':report}
-    def read(self,source_id,scope):
+    def read(self,source_id,scope,expected_hash=None):
         clause,args=self.clause(scope)
         with self.connect() as db:
             row=db.execute('SELECT * FROM sources WHERE source_id=? AND '+clause,[source_id]+args).fetchone()
         if row is None: raise Error('NOT_FOUND','Source not found in authorized scope')
         value=dict(row)
+        if expected_hash is not None and value['sha256']!=expected_hash:
+            raise Error('STALE_INDEX','The cited version was replaced; search for current evidence')
         self.w.allowed(value['source_path'],scope)
         path=self.w.path(value['source_path'])
         if value['sha256'].startswith('git:'):

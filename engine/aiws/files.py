@@ -2,6 +2,7 @@
 from pathlib import Path
 import hashlib
 import os
+import re
 from .core import Error, atomic, digest, load, now, put_json
 from .jobs import Jobs, Artifacts
 
@@ -12,6 +13,40 @@ class Files:
     def directories(self,jid):
         j=Jobs(self.w).get(jid)
         return [{'project_id':p['project_id'],'work':p['path']+'/工作/'+j.get('directory_name',jid),'deliverables':p['path']+'/成果/'+j.get('directory_name',jid)} for p in [self.w.project_for(pid) for pid in j['scope']['project_ids']]]
+    def receive(self,jid,project_id,name,content=None,expected_hash=None,confirm=False,lease_token=None,source_ref=None,copy_id=None):
+        """File actual attachment bytes into 项目/资料, optionally from an authorized checkout copy."""
+        if not isinstance(name,str) or not name or Path(name).name!=name or name in ('.','..'):
+            raise Error('INVALID_ARGUMENT','Single filename required')
+        if name.startswith(('.','~$')):raise Error('INVALID_ARGUMENT','Hidden or temporary names are never indexed; rename the attachment')
+        j=Jobs(self.w).get(jid)
+        if project_id not in j['scope']['project_ids']:raise Error('INVALID_SCOPE','Project outside job')
+        relative=self.w.project_for(project_id)['path']+'/资料/'+name
+        record_path=None
+        if copy_id is not None:
+            if content is not None:raise Error('INVALID_ARGUMENT','Supply attachment bytes or copy_id, exclusively')
+            if not isinstance(copy_id,str) or not re.fullmatch(r'[0-9a-f]{32}',copy_id):
+                raise Error('INVALID_ARGUMENT','Invalid controlled copy ID')
+            record_path=Path('.workspace/edits')/jid/copy_id/'record.json'
+            record_file=self.w.path(record_path)
+            if not record_file.is_file():raise Error('NOT_FOUND','Controlled attachment copy not found')
+            record=load(record_file)
+            expected_source=(Path(self._directory(jid,project_id)['work'])/'工作稿'/name).as_posix()
+            expected_copy=(Path('.workspace/edits')/jid/copy_id/'content'/name).as_posix()
+            if (record.get('copy_id')!=copy_id or record.get('source')!=expected_source
+                    or record.get('path')!=expected_copy):
+                raise Error('INVALID_SCOPE','Controlled copy does not belong to this job, project, and filename')
+            copy_path=self.w.path(expected_copy)
+            if not copy_path.is_file():raise Error('NOT_FOUND','Controlled attachment copy missing')
+            content=copy_path.read_bytes()
+        if not isinstance(content,bytes):raise Error('INVALID_ARGUMENT','Source content must be bytes')
+        result=Artifacts(self.w).save(jid,relative,content,expected_hash=expected_hash,
+                                      confirm=confirm,purpose='source',lease_token=lease_token,
+                                      receive=True,source_ref=source_ref)
+        # The checkout is now consumed as an original, never fabricated into 工作稿.
+        if record_path is not None:
+            record=load(self.w.path(record_path))
+            put_json(self.w.path(record_path),{**record,'received':result})
+        return result
     def _directory(self,jid,project_id):
         directory=next((d for d in self.directories(jid) if d['project_id']==project_id),None)
         if not directory:raise Error('INVALID_SCOPE','Project outside job')

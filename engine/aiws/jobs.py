@@ -183,6 +183,22 @@ class Jobs:
             if new in ('completed','cancelled'):j['lease']={}
             j['revision']+=1;j['updated_at']=now()
             return self.persist(j)
+
+    def record_feedback(self, jid, feedback, lease_token=None):
+        """Keep a user instruction on this task without promoting it to project memory."""
+        if not isinstance(feedback, str) or not feedback.strip() or len(feedback) > 2000:
+            raise Error('INVALID_ARGUMENT', 'Task feedback must be 1..2000 characters')
+        with self.w.lock('job:'+jid):
+            j=self.get(jid)
+            from .workflow import check_lease
+            from .remote_store import enabled
+            check_lease(j, lease_token, require=enabled(self.w))
+            text=feedback.strip()
+            if text in j['decisions']:
+                return dict(job_id=jid, feedback=text, scope='task', revision=j['revision'], replayed=True)
+            j['decisions'].append(text)
+            j['revision']+=1;j['updated_at']=now();self.persist(j)
+            return dict(job_id=jid, feedback=text, scope='task', revision=j['revision'])
     def resume(self,jid,detail="brief"):
         return self.resume_record(self.get(jid), detail)
 
@@ -242,7 +258,7 @@ class Jobs:
 
 class Artifacts:
     def __init__(self,w):self.w=w;self.jobs=Jobs(w)
-    def save(self,jid,relative,content,expected_hash=None,confirm=False,purpose='draft',lease_token=None,allow_closed=False):
+    def save(self,jid,relative,content,expected_hash=None,confirm=False,purpose='draft',lease_token=None,allow_closed=False,receive=False,source_ref=None):
         j=self.jobs.get(jid)
         from .workflow import check_lease
         from .remote_store import enabled
@@ -257,17 +273,37 @@ class Artifacts:
             if not sub or sub[0] not in ('资料','工作','成果'):raise Error('INVALID_SCOPE','Project metadata is tool-managed')
             if sub[0]=='工作' and (len(sub)<3 or sub[1] not in (jid,j.get('directory_name',jid))):raise Error('INVALID_SCOPE','Draft must belong to this job')
         formal=kind!='project' or '工作' not in parts
-        if formal and not confirm:raise Error('CONFIRMATION_REQUIRED','Explicit confirmation required to publish formal knowledge')
+        if receive and (kind!='project' or sub[0]!='资料' or purpose!='source'):
+            raise Error('INVALID_SCOPE','Attachments belong in the selected project sources')
+        if formal and not receive and not confirm:raise Error('CONFIRMATION_REQUIRED','Explicit confirmation required to publish formal knowledge')
         relative=self.w.path(relative).relative_to(self.w.root).as_posix()
         if not isinstance(content,bytes):raise Error('INVALID_ARGUMENT','Artifact content must be bytes')
         with self.w.lock('file:'+relative):
             target=self.w.path(relative)
             actual=digest(target) if target.exists() else None
+            incoming=hashlib.sha256(content).hexdigest()
+            if receive and actual==incoming:
+                original={'path':relative,'hash':incoming,'purpose':'source','status':'original'}
+                with self.w.lock('job:'+jid):
+                    latest=self.jobs.get(jid)
+                    if original not in latest['artifacts']:
+                        latest['artifacts']=[a for a in latest['artifacts'] if a['path']!=relative]+[original]
+                        latest['revision']+=1;latest['updated_at']=now();self.jobs.persist(latest)
+                return {**original,'replayed':True}
+            if receive and actual is not None and not confirm:
+                raise Error('CONFIRMATION_REQUIRED','Confirm replacement of the previous source version')
             if actual!=expected_hash:
                 conflict=self.w.path(f'.workspace/history/conflicts/{jid}/{hashlib.sha256(content).hexdigest()}')
                 atomic(conflict,content)
                 raise Error('CONFLICT','File changed; incoming revision preserved in history/conflicts')
-            event={'schema_version':1,'job_id':jid,'path':relative,'old_hash':actual,'new_hash':hashlib.sha256(content).hexdigest(),'confirmed':confirm,'actor':'local-user' if confirm else j['last_agent'],'time':now()}
+            artifact={'path':relative,'hash':incoming,'purpose':purpose,
+                      'status':'original' if receive else 'approved' if formal else 'draft'}
+            # Keep enough intent in the durable journal to repair a crash after
+            # the bytes are committed but before job.json can be advanced.
+            event={'schema_version':1,'job_id':jid,'path':relative,'old_hash':actual,'new_hash':artifact['hash'],
+                   'confirmed':confirm and not receive,'actor':'local-user' if confirm else j['last_agent'],
+                   'time':now(),'artifact':artifact}
+            if receive and source_ref is not None:event['source_ref']=source_ref
             event_id=hashlib.sha256((relative+now()).encode()).hexdigest()
             if target.exists():
                 atomic(self.w.path(f'.workspace/history/files/{actual}'),target.read_bytes())
@@ -275,12 +311,96 @@ class Artifacts:
                     archive=target.parent/'历史版本'/(target.stem+'_'+actual[:12]+target.suffix)
                     atomic(archive,target.read_bytes())
             put_json(self.w.path(f'.workspace/history/events/{event_id}.json'),{**event,'phase':'prepared'})
+            recovery_key=hashlib.sha256(relative.encode()).hexdigest()
+            recovery_record=self.w.path(f'.workspace/recovery/{jid}/{recovery_key}.json')
+            put_json(recovery_record,{**event,'phase':'prepared'})
             atomic(target,content)
             put_json(self.w.path(f'.workspace/history/events/{event_id}.json'),{**event,'phase':'committed'})
-            artifact={'path':relative,'hash':digest(target),'purpose':purpose,'status':'approved' if formal else 'draft'}
+            artifact={**artifact,'hash':digest(target)}
             with self.w.lock('job:'+jid):
                 latest=self.jobs.get(jid)
                 latest['artifacts']=[a for a in latest['artifacts']
                                      if Path(a['path']).as_posix()!=relative]+[artifact]
                 latest['revision']+=1;latest['updated_at']=now();self.jobs.persist(latest)
-            return artifact
+            recovery_record.unlink(missing_ok=True)
+            return {**artifact,'replayed':False} if receive else artifact
+
+    def _classify_recovery(self, job, event):
+        """Classify an intent without changing bytes or job state."""
+        artifact=event.get('artifact')
+        if not isinstance(artifact,dict) or set(artifact)!={'path','hash','purpose','status'} or artifact['path']!=event.get('path'):
+            return None, 'invalid_journal'
+        try:
+            self.w.allowed(artifact['path'],job['scope'],drafts=True)
+            target=self.w.path(artifact['path'])
+            actual=digest(target) if target.is_file() else None
+        except Error:
+            return artifact, 'outside_scope'
+        current=next((a for a in job['artifacts'] if a['path']==artifact['path']),None)
+        if current == artifact:
+            return artifact, 'completed'
+        if actual == artifact['hash']:
+            # The disk has the intended version.  A missing record or the
+            # recorded old version are the only safe metadata repairs.
+            if current is None or current.get('hash') == event.get('old_hash'):
+                return artifact, 'recoverable'
+            return artifact, 'metadata_conflict'
+        if actual == event.get('old_hash') and (current is None or current.get('hash') == actual):
+            return artifact, 'not_written'
+        return artifact, 'changed_or_missing'
+
+    def recovery_status(self, jid, job=None):
+        """Read only this job's recovery journal for normal resume."""
+        self.jobs.file(jid)
+        folder=self.w.path(f'.workspace/recovery/{jid}')
+        records=[] if not folder.is_dir() else [load(path) for path in sorted(folder.glob('*.json'))]
+        job=job or self.jobs.get(jid)
+        recoverable=[];pending=[]
+        for event in records:
+            if event.get('job_id')!=jid:
+                continue
+            artifact,state=self._classify_recovery(job,event)
+            if state in ('completed','not_written'):continue
+            item={'path':artifact.get('path') if artifact else event.get('path'),'state':state}
+            (recoverable if state=='recoverable' else pending).append(item)
+        return {'recoverable':recoverable,'pending':pending}
+
+    def recover(self, jid, lease_token=None):
+        """Backfill artifact metadata for a committed, intact local file.
+
+        Recovery never writes business bytes.  It only accepts journal entries
+        emitted by :meth:`save`, validates the current task scope, and leaves
+        a manually changed file as an actionable pending item.
+        """
+        from .remote_store import enabled
+        from .workflow import check_lease
+        self.jobs.file(jid)
+        with self.w.lock('job:'+jid):
+            job=self.jobs.get(jid)
+            check_lease(job,lease_token,require=enabled(self.w))
+            recovered=[];pending=[];recovered_intents=[]
+            recovery_folder=self.w.path(f'.workspace/recovery/{jid}')
+            # New saves have a job-local journal so resume is bounded.  The
+            # historical fallback is only used by an explicit repair command.
+            event_paths=(sorted(recovery_folder.glob('*.json')) if recovery_folder.is_dir()
+                         else sorted(self.w.path('.workspace/history/events').glob('*.json')))
+            for event_path in event_paths:
+                event=load(event_path)
+                if event.get('job_id')!=jid:
+                    continue
+                artifact,state=self._classify_recovery(job,event)
+                if state in ('completed','not_written'):
+                    continue
+                if state!='recoverable':
+                    pending.append({'path':artifact.get('path') if artifact else event.get('path'),'state':state})
+                    continue
+                job['artifacts']=[a for a in job['artifacts'] if a['path']!=artifact['path']]+[artifact]
+                recovered.append(artifact)
+                if recovery_folder.is_dir() and event_path.is_relative_to(recovery_folder):
+                    recovered_intents.append(event_path)
+            if recovered:
+                job['revision']+=1;job['updated_at']=now()
+                self.jobs.persist(job)
+                for event_path in recovered_intents:event_path.unlink(missing_ok=True)
+            return {'job_id':jid,'recovered':recovered,'pending':pending,
+                    'revision':job['revision']}

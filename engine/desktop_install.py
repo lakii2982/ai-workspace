@@ -21,11 +21,11 @@ ROUTINE = (
     'list_projects', 'get_project', 'create_project', 'update_project',
     'get_project_overview', 'list_jobs', 'resolve_job', 'create_job', 'resume_job',
     'claim_job', 'renew_claim', 'release_job', 'bind_session', 'resume_session',
-    'prepare_work_context', 'search_sources', 'read_source', 'read_project_file',
+    'prepare_work_context', 'open_work', 'search_sources', 'read_source', 'read_project_file',
     'compare_project_file', 'list_project_memory', 'read_project_memory',
     'mark_context_read', 'append_timeline', 'checkpoint_job', 'save_work_checkpoint',
-    'write_work_file', 'save_artifact', 'checkout_draft', 'commit_draft',
-    'request_publication', 'list_decisions', 'list_scenarios', 'read_scenario',
+    'write_work_file', 'save_artifact', 'receive_source', 'checkout_draft', 'commit_draft',
+    'request_publication', 'list_decisions', 'record_sent', 'list_sent', 'read_sent_version', 'list_scenarios', 'read_scenario',
     'apply_scenario',
 )
 
@@ -124,7 +124,7 @@ def configure(client, workspace, launcher, *, activate=False, source=None):
     if client == 'codex':
         # The plugin supplies instructions; there is only one MCP registration.
         plugin = workspace / 'plugins' / 'aiws'
-        save(plugin / '.codex-plugin/plugin.json', encoded(dict(name='aiws', version='0.1.2',
+        save(plugin / '.codex-plugin/plugin.json', encoded(dict(name='aiws', version='0.1.3',
              description='在本地工作空间接续任务、管理资料和成果', skills='./skills/')))
         save(plugin / 'skills/aiws/SKILL.md', skill.encode())
         catalog = workspace / '.agents/plugins/marketplace.json'
@@ -137,6 +137,20 @@ def configure(client, workspace, launcher, *, activate=False, source=None):
             market['plugins'].append({'name': 'aiws', 'source': source, 'category': 'Productivity',
                                       'policy': {'installation': 'AVAILABLE', 'authentication': 'ON_INSTALL'}})
             save(catalog, encoded(market))
+        root = workspace.parent
+        if workspace == launcher.parent.parent / 'Workspace':
+            root_catalog = root / '.agents/plugins/marketplace.json'
+            root_market = (json.loads(root_catalog.read_text()) if root_catalog.exists()
+                           else {'name': 'workspace-root', 'plugins': []})
+            root_source = {'source': 'local', 'path': './Workspace/plugins/aiws'}
+            root_existing = next((p for p in root_market['plugins'] if p['name'] == 'aiws'), None)
+            if root_existing and root_existing.get('source') != root_source:
+                raise ValueError(f'Another aiws plugin already exists: {root_catalog}')
+            if not root_existing:
+                root_market['plugins'].append({'name': 'aiws', 'source': root_source,
+                                                'category': 'Productivity',
+                                                'policy': {'installation': 'AVAILABLE', 'authentication': 'ON_INSTALL'}})
+                save(root_catalog, encoded(root_market))
         result.update(marketplace=str(catalog),
                       action='信任实际打开的目录，新建 Codex 会话并运行 verify_desktop_binding 核对数据目录')
     elif client == 'workbuddy':

@@ -7,6 +7,8 @@ import subprocess
 import sys
 import tomllib
 
+from install_workspace import PREVIOUS_RULES
+
 
 def test_install_keeps_core_and_workspace_separate(tmp_path):
     checkout = Path(__file__).resolve().parents[2]
@@ -45,7 +47,12 @@ def test_install_keeps_core_and_workspace_separate(tmp_path):
     assert install["core"] == str(core)
     assert install["workspace"] == str(default)
     assert install["doctor"] == "healthy" and install["mcp"] == "verified"
+    assert install["clients"][0]["status"] == "awaiting_host_verification"
     assert install["clients"][0]["session_directories"] == [str(default), str(root)]
+    assert "open_work" in (root / "AGENTS.md").read_text()
+    assert not install["clients"][0].get("custom_instructions")
+    root_market = json.loads((root / ".agents/plugins/marketplace.json").read_text())
+    assert root_market["plugins"] == [{"name": "aiws", "source": {"source": "local", "path": "./Workspace/plugins/aiws"}, "category": "Productivity", "policy": {"installation": "AVAILABLE", "authentication": "ON_INSTALL"}}]
     config = tomllib.loads((default / ".codex" / "config.toml").read_text())
     server = {
         "command": str(core / "aiws"), "args": ["--mcp"], "env": {"AIWS_WORKSPACE": str(default)},
@@ -61,8 +68,11 @@ def test_install_keeps_core_and_workspace_separate(tmp_path):
     assert tomllib.loads(root_config.read_text())["mcp_servers"]["aiws"] == {**registered, "tools": approvals}
     skill = (default / "plugins" / "aiws" / "skills" / "aiws" / "SKILL.md").read_text()
     assert "AIWS 项目、任务和资料操作统一通过 MCP" in skill
+    assert "先调用 `open_work` 概括本次意图" in skill
+    assert "用户选定项目之前，不创建任务、不写文件" in skill
     assert "记忆/条目/" in skill
     assert "记忆/条目/" in (default / "AGENTS.md").read_text()
+    assert "先调用 `open_work` 概括本次意图" in (default / "AGENTS.md").read_text()
     assert not (default / "aiws").exists()
     assert not (core / ".workspace").exists()
 
@@ -81,15 +91,22 @@ command = "existing"
 """)
     root_config.unlink()
     run("aiws", "project", "create", "--name", "默认数据")
-    run("install.sh", "--agent", "codex")
+    (root / "AGENTS.md").write_text("Existing root rules\n")
+    repeated=run("install.sh", "--agent", "codex")
+    assert repeated["clients"][0]["custom_instructions"] == [str(default),str(root)]
+    assert (root / "AGENTS.md").read_text()=="Existing root rules\n"
     assert notes.read_text() == "Existing user notes\n"
     assert rules.read_text() == "Existing custom rules\n"
     upgraded = tomllib.loads(config_path.read_text())["mcp_servers"]
     assert upgraded["other"] == {"command": "existing"}
     assert upgraded["aiws"]["tools"]["resume_job"]["approval_mode"] == "prompt"
     assert upgraded["aiws"]["tools"]["append_timeline"]["approval_mode"] == "approve"
+    assert upgraded["aiws"]["tools"]["open_work"]["approval_mode"] == "approve"
+    assert upgraded["aiws"]["tools"]["receive_source"]["approval_mode"] == "approve"
+    assert upgraded["aiws"]["tools"]["read_sent_version"]["approval_mode"] == "approve"
     assert upgraded["aiws"]["required"] is True
     assert tomllib.loads(root_config.read_text())["mcp_servers"]["aiws"] == upgraded["aiws"]
+    assert json.loads((root / ".agents/plugins/marketplace.json").read_text()) == root_market
 
     custom = root / "另外一个工作空间"
     install = run("install.sh", str(custom), "--agent", "claude")
@@ -99,3 +116,9 @@ command = "existing"
     assert config["mcpServers"]["aiws"] == {"type": "stdio", **server}
     assert len(run("aiws", "project", "list")["result"]["items"]) == 1
     assert run("aiws", "--workspace", str(custom), "project", "list")["result"]["items"] == []
+
+
+def test_known_workspace_rules_version_is_eligible_for_upgrade():
+    assert "5c15bbe2d0d763e6706e0c5d0ab6c0717fefd1fcec3076b7e647c60565348e24" in PREVIOUS_RULES
+    assert "441c79f9f7cbb9c2ea5acee97b5c4cbaa35820ccd2d53160afb084f5a091fbdc" in PREVIOUS_RULES
+    assert "f7fe38b67f8f2133e25f9b9ab39ca8987e5f38aabd29742de9d23084f6874832" in PREVIOUS_RULES
