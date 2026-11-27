@@ -81,8 +81,8 @@ class Workflow:
                       resume=dict(operation='resume_job', jid=jid))
         path = self.w.path(f'.workspace/handoffs/{jid}/{handoff_id}.json')
         put_json(path, record)
-        return {**record, 'delivery':dict(status='not_delivered',
-                reason='No receiving session has accepted this handoff',
+        return {**record, 'handoff':dict(status='prepared',
+                reason='No receiving session has claimed this handoff',
                 fallback='continue_with_current_agent' if not independent_review else 'wait_for_independent_reviewer')}
 
     def read_handoff(self, jid, handoff_id):
@@ -96,9 +96,20 @@ class Workflow:
             raise Error('INVALID_STATE', 'Receiving session is not bound to this task')
         path = self.w.path(f'.workspace/handoffs/{jid}/{self._handoff_id(handoff_id)}.json')
         record = load(path)
-        if record['status'] == 'received':
+        if record['status'] in ('claimed_by_bound_session', 'human_acknowledged'):
             return record
-        record.update(status='received', received_at=now(), receiving_session=session_id)
+        record.update(status='claimed_by_bound_session', claimed_at=now(), receiving_session=session_id)
+        put_json(path, record)
+        return record
+
+    def acknowledge_handoff(self, jid, handoff_id, note, confirm=False):
+        if confirm is not True or not isinstance(note, str) or not note.strip():
+            raise Error('CONFIRMATION_REQUIRED', 'Explicit human acknowledgement is required')
+        path = self.w.path(f'.workspace/handoffs/{jid}/{self._handoff_id(handoff_id)}.json')
+        record = load(path)
+        if record['status'] == 'human_acknowledged':
+            return record
+        record.update(status='human_acknowledged', acknowledged_at=now(), acknowledgement=note.strip())
         put_json(path, record)
         return record
 

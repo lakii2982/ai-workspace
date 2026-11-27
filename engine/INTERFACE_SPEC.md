@@ -65,7 +65,7 @@ DELIVERABLE_REQUIRED：任务转completed时，若 工作/JOB/工作稿/ 仍有�
 - create_job增加request_id；飞书启用后必须提供项目范围及request_id。重复请求复用同一任务。
 - checkpoint_job、save_artifact增加lease_token；飞书启用后必需。
 - record_task_feedback(jid,feedback,lease_token?)：记录只对当前任务有效的一次性用户意见，不写入项目记忆；相同文本重试返回 `replayed=true`。跨任务仍有效的项目约定继续使用 `save_memory_note(type='project' 或 'feedback')`。
-- prepare_handoff(jid,note,requested_agent='',independent_review=false)：生成可带走的接续包，默认建议当前 Agent 继续。点名接收者只记录请求，不把未验证可用性称为已送达。独立复核会明确等待独立接收者。read_handoff 读取接续包，accept_handoff 仅在接收会话已绑定同一任务时记录 `received` 和接收会话证据。
+- prepare_handoff(jid,note,requested_agent='',independent_review=false)：生成可带走的接续包，默认建议当前 Agent 继续。点名接收者只记录请求，不把未验证可用性称为已送达。独立复核会明确等待独立接收者。read_handoff 读取接续包，accept_handoff 仅记录已绑定 AIWS 会话的 `claimed_by_bound_session`，不证明外部渠道送达或人工接收；用户明确确认后以 acknowledge_handoff 单独记录 `human_acknowledged`。
 - claim_job(jid,owner,revision,ttl=1800)：返回lease.token及新revision。renew_claim(jid,revision,token,ttl)；release_job(jid,revision,token,next_steps)。TTL 30..7200秒。
 - resolve_job(project?,query='',jid?)：唯一时返回task；多匹配返回候选，不自动选择。
 - bind_session(session_id,jid)、resume_session(session_id)：绑定稳定任务身份，恢复读取远端最新状态。

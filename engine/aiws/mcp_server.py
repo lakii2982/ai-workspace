@@ -91,8 +91,12 @@ def read_handoff(jid:str,handoff_id:str)->dict:
     return invoke('read_handoff',dict(jid=jid,handoff_id=handoff_id))
 @server.tool()
 def accept_handoff(jid:str,handoff_id:str,session_id:str)->dict:
-    """Record delivery only when this receiving session is already bound to the same task."""
+    """Record a bound AIWS session's claim. It does not prove external delivery or human receipt."""
     return invoke('accept_handoff',dict(jid=jid,handoff_id=handoff_id,session_id=session_id))
+@server.tool()
+def acknowledge_handoff(jid:str,handoff_id:str,note:str,confirm:bool=False)->dict:
+    """Record an explicit human acknowledgement separately from an AIWS session claim."""
+    return invoke('acknowledge_handoff',dict(jid=jid,handoff_id=handoff_id,note=note,confirm=confirm))
 @server.tool()
 def save_artifact(jid:str,relative:str,content:str|None=None,content_base64:str|None=None,expected_hash:str|None=None,confirm:bool=False,purpose:str='draft',lease_token:str|None=None)->dict:
     """Save text/binary with expected SHA256. confirm=true only after actual user authorization to publish formal knowledge."""

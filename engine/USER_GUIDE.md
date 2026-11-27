@@ -27,7 +27,7 @@ Git 版本与工作区以磁盘已保存内容为准。ignored 文件、嵌套�
 
 get_project_overview 提供任务分组与成果、问题、下一步；不会把任务完成比例当成项目完成度。prepare 的 brief 若有省略，按 expand 取 full；Agent 仍须阅读需要修改的正文，不能只看摘要。
 
-项目概览优先展示待验收任务，其次才是阻塞、进行中和新任务。已完成或已取消任务不占用当前工作的摘要名额，需要回看时用完整概览或归档资料。
+项目概览优先展示待验收任务，其次才是阻塞、进行中和新任务。任务有发布确认事项时，待确认项优先于已退回或已处理项。已完成或已取消任务不占用当前工作的摘要名额，但仍可通过 `list_jobs(status='completed')` 定位。
 
 告诉 Agent 你的目标和项目名称即可；Agent 负责查项目、绑定范围、查证来源和持久化任务。不要依赖聊天记录保存进度。
 
@@ -57,8 +57,8 @@ get_project_overview 提供任务分组与成果、问题、下一步；不会�
 3. 飞书模式开始写入先 `call claim_job`，参数jid/owner/revision，返回lease.token；后续checkpoint、保存文件带lease_token。认领30秒至2小时，到期前renew_claim。旧凭证被拒绝后重新恢复，不盲目重试。
 4. 新任务必须包含项目范围和稳定request_id。相同request_id重试不重复创建；同ID不同内容拒绝。
 5. `call bind_session`绑定session_id/jid，换客户端用resume_session恢复最新状态。不要把上次会话的文本当成最新事实。
-   一次性意见用 `record_task_feedback` 留在当前任务。跨任务有效的项目约定用 `save_memory_note` 保存为 `project` 或 `feedback` 条目。个人场景由 `save_scenario` 保存，与来源项目无绑定，可以在其他项目的新任务用 `apply_scenario` 固定版本。
-   要求其他 Agent 或独立复核时，先 `prepare_handoff` 生成可带走的接续包。未有接收会话时，它只会显示未送达和当前 Agent 继续的回退方案。接收方绑定同一任务后调用 `accept_handoff`，才记录已接收。
+   一次性意见用 `record_task_feedback` 留在当前任务。跨任务有效的项目约定用 `save_memory_note` 保存为 `project` 或 `feedback` 条目，失效时用 `delete_memory_note` 撤销。项目约定不跨项目继承。个人场景由 `save_scenario` 保存，与来源项目无绑定，可以在其他项目的新任务用 `apply_scenario` 固定版本。
+   要求其他 Agent 或独立复核时，先 `prepare_handoff` 生成可带走的接续包。未有接收会话时，它只会显示待认领和当前 Agent 继续的回退方案。接收方绑定同一任务后调用 `accept_handoff`，只记录受管会话认领。人工明确说已接收时才以 `acknowledge_handoff` 单独留痕，两者都不代表外部渠道送达。
 6. `call write_work_file`按jid/project_id/name/kind写工作稿或过程材料，旧文件必须带expected_hash。`call publish_file`须绑定source_hash和具体用户确认，旧成果进入同目录历史版本。没有成果表。
 7. 重要决策、范围变化和交付结果用append_timeline写入所属项目；必须提供事件日期、记录日期、性质、状态、影响、责任人、后续和来源，带旧hash；事件ID可安全重试。
 8. 完成任务先 review，再 completed。飞书模式必须给每条验收条件提供verification中的criterion/path/hash，且没有未解决阻塞。完成技术工作不代表用户已批准文件发布。交接用release_job并提供next_steps。
