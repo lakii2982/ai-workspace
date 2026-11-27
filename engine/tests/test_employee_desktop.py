@@ -26,7 +26,9 @@ def test_office_handoff_publication_and_scenario(tmp_path):
 
     new = call('checkout_draft', dict(**args, name=main.name, create=True))
     write(tmp_path / new['path'], '报价 100')
-    call('commit_draft', dict(jid=jid, copy_id=new['copy_id']))
+    initial_commit=call('commit_draft', dict(jid=jid, copy_id=new['copy_id']))
+    assert initial_commit['job_revision']==task['revision']+1
+    assert 'job_revision' not in call('resume_job', {'jid':jid, 'detail':'full'})['artifacts'][0]
     checkout = call('checkout_draft', dict(**args, name=main.name))
     write(tmp_path / checkout['path'], 'A 报价 100')
     request = dict(**args, name=main.name, target_name='报价_v1.0.docx', reason='核准报价')

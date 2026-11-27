@@ -94,7 +94,7 @@ class Desktop:
             raise Error('NOT_FOUND', 'Controlled draft copy not found')
         record = load(meta)
         if 'committed' in record:
-            return record['committed']
+            return {**record['committed'], 'job_revision': self.jobs.get(jid)['revision']}
         data = self.w.path(record['path']).read_bytes()
         target = self.w.path(record['source'])
         incoming = hashlib.sha256(data).hexdigest()
@@ -102,7 +102,9 @@ class Desktop:
                          if a['path'] == record['source'] and a['hash'] == incoming), None)
         matches_copy = target.is_file() and digest(target) == incoming
         if existing and matches_copy:
-            result = existing
+            # This replay does not modify the manifest, but its current
+            # revision is still the only safe CAS value for the next step.
+            result = {**existing, 'job_revision': self.jobs.get(jid)['revision']}
         else:
             # A previous save may have replaced the file before persisting
             # its job manifest. Compare the identical bytes again under lock.
