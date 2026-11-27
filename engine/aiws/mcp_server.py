@@ -248,6 +248,24 @@ def list_decisions(project_id:str,jid:str|None=None,state:str|None=None,limit:in
 
 
 @server.tool()
+def record_sent(jid:str,project_id:str,name:str,source_hash:str,channel:str='',evidence_path:str|None=None,evidence_hash:str|None=None,lease_token:str|None=None)->dict:
+    """Record a user's already-sent published version. A verified local receipt file is optional. This never sends anything."""
+    return invoke("record_sent", locals())
+
+
+@server.tool(annotations=ToolAnnotations(readOnlyHint=True, destructiveHint=False))
+def list_sent(project_id:str,jid:str|None=None,name:str|None=None,source_hash:str|None=None,limit:int=20,offset:int=0)->dict:
+    """Find records of versions the user reported as sent, filtered by exact file version when needed."""
+    return invoke("list_sent", locals())
+
+
+@server.tool(annotations=ToolAnnotations(readOnlyHint=True, destructiveHint=False))
+def read_sent_version(project_id:str,sent_id:str)->dict:
+    """Read the exact current or archived bytes of a recorded sent version."""
+    return invoke("read_sent_version", locals())
+
+
+@server.tool()
 def save_scenario(jid:str,title:str,instructions:str,reason:str,confirmed:bool=False,expected_version:int=0,scenario_id:str|None=None,lease_token:str|None=None)->dict:
     """Store reusable instructions with case-specific details replaced by variables."""
     return invoke("save_scenario", locals())

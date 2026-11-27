@@ -57,6 +57,29 @@ def test_office_handoff_publication_and_scenario(tmp_path):
     assert resumed['publication_decisions'][pid]['items']
     published = tmp_path / resumed['directories'][0]['deliverables'] / request['target_name']
     assert digest(main) == digest(published) == saved['hash']
+    sent = call('record_sent', dict(**args, name=request['target_name'], source_hash=saved['hash']))
+    assert sent['status'] == 'reported_sent'
+    assert sent['evidence']['kind'] == 'user_statement'
+    listed = call('list_sent', dict(project_id=pid, name=request['target_name'], source_hash=saved['hash']))['items']
+    assert listed[0]['sent_id'] == sent['sent_id'] and listed[0]['version']['state'] == 'current'
+    with pytest.raises(Error, match='Published deliverable'):
+        call('record_sent', dict(**args, name=request['target_name'], source_hash='0' * 64,
+                                 channel='email'))
+
+    second = call('write_work_file', dict(**args, name=main.name, content='报价 120',
+                                           expected_hash=saved['hash']))
+    replacement = call('publish_file', dict(**args, source=draft, source_hash=second['hash'],
+                                             name=request['target_name'], expected_hash=saved['hash'], confirm=True))
+    receipt = tmp_path / project['path'] / '资料/邮件回执.txt'
+    receipt.write_text('message-id: 43')
+    latest = call('record_sent', dict(**args, name=request['target_name'], source_hash=replacement['hash'],
+                                      channel='email', evidence_path=str(receipt.relative_to(tmp_path)),
+                                      evidence_hash=digest(receipt)))
+    assert latest['evidence']['kind'] == 'channel_receipt'
+    versions = call('list_sent', dict(project_id=pid, name=request['target_name']))['items']
+    assert [item['source_hash'] for item in versions] == [replacement['hash'], saved['hash']]
+    assert versions[1]['version']['state'] == 'archived'
+    assert call('read_sent_version', dict(project_id=pid, sent_id=sent['sent_id']))['content_hex']
 
     scenario_args = dict(jid=jid, title='按客户询价', instructions='从当前任务取得客户名与产品清单。', reason='保存本次做法')
     scenario = call('save_scenario', scenario_args)
