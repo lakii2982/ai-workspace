@@ -34,7 +34,7 @@
 - create_job: title(str), goal(str), scope(object), acceptance(list[str],可选), agent(str,可选)
 - resume_job: jid(str)
 - checkpoint_job: jid(str), revision(int), patch(object), reopen(bool,默认false)
-- search_sources: query(str), scope(object), limit(int,默认20)
+- search_sources: query(str), scope(object), limit(int,默认20), strict(bool,默认false)。常规搜索枚举当前范围，未变化的本地文件用设备、文件标识、大小与修改/状态时间复用已有索引。strict=true 或显式 index update 重新校验文件内容。read_source 引用前始终回读原件并核对指纹。旧索引在首次访问时自动补齐派生缓存。
 - read_source: source_id(str), scope(object)
 - save_artifact: jid(str), relative(str), content(str)或content_base64(str), expected_hash(str|null,默认null表示必须不存在), confirm(bool,默认false), purpose(str,默认draft)
 - restore: archive(str), destination(str,必须为不存在目录)

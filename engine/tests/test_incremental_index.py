@@ -128,6 +128,37 @@ def test_transient_parse_failure_is_retried(tmp_path, monkeypatch):
     assert r.search('transient example',scope)['matches']
 
 
+def test_warm_search_skips_unchanged_originals_and_strict_search_rechecks(tmp_path, monkeypatch):
+    w = Workspace(tmp_path); w.init()
+    project = w.project_create('热搜')
+    folder = w.path(project['path']) / '资料'
+    for i in range(240):
+        (folder / f'{i}.txt').write_text(f'item {i}')
+    retrieval = Retrieval(w)
+    scope = project_scope(project)
+    hit = retrieval.search('item 239', scope)['matches'][0]
+    reads = []
+    read_bytes = type(folder).read_bytes
+
+    def count(path):
+        if path.parent == folder:
+            reads.append(path.name)
+        return read_bytes(path)
+
+    monkeypatch.setattr(type(folder), 'read_bytes', count)
+    assert retrieval.search('item 239', scope)['matches'] == [hit]
+    assert reads == []
+    (folder / '239.txt').write_text('replaced')
+    (folder / '238.txt').unlink()
+    (folder / 'new.txt').write_text('another new file')
+    assert retrieval.search('replaced', scope)['matches']
+    assert set(reads) == {'239.txt', 'new.txt'}
+    reads.clear()
+    assert not retrieval.search('item 238', scope, strict=True)['matches']
+    assert len(reads) == 240
+    assert not retrieval.search('item 239', scope)['matches']
+
+
 @pytest.mark.parametrize('use_git', [False, True])
 def test_approval_status_updates_without_replacing_unchanged_rows(tmp_path, use_git):
     w=Workspace(tmp_path);w.init();p=w.project_create('Approval')
