@@ -59,6 +59,12 @@ class Retrieval:
                     status TEXT, error TEXT, PRIMARY KEY(root,path)
                 )
             """)
+            db.execute("""
+                CREATE TABLE IF NOT EXISTS source_file_stats (
+                    root TEXT NOT NULL, path TEXT NOT NULL, signature TEXT NOT NULL,
+                    PRIMARY KEY(root,path)
+                )
+            """)
             yield db
             db.commit()
         except BaseException:
@@ -66,7 +72,7 @@ class Retrieval:
             raise
         finally:
             db.close()
-    def update(self, scope=None):
+    def update(self, scope=None, *, strict=True):
         """Refresh selected roots and only replace rows for changed files."""
         if scope is not None:self.w.scope(scope)
         projects = self.w.projects() if scope is None else [
@@ -81,14 +87,14 @@ class Retrieval:
             # A slow file parser may delay another search in this root, but
             # does not exclude work in unrelated roots or hold a SQLite writer.
             with self.w.lock('index-root:'+root):
-                n,errors=self._update_root(root,pid)
+                n,errors=self._update_root(root,pid,strict)
             changed+=n
             failures.extend(errors)
         with self.connect() as db:
             count=db.execute('SELECT count(*) FROM sources').fetchone()[0]
         return {'sources':count,'changed_files':changed,'failures':failures}
 
-    def _update_root(self, root, pid):
+    def _update_root(self, root, pid, strict):
         git=None;observation=None
         if pid:
             from .git_store import GitStore
@@ -100,7 +106,9 @@ class Retrieval:
             candidates=((p.relative_to(self.w.root).as_posix(),None,None)
                         for p in sorted(self.w.path(root).rglob('*')) if p.is_file())
         with self.connect() as db:
-            cached={r['path']:dict(r) for r in db.execute('SELECT * FROM source_files WHERE root=?',(root,))}
+            cached = {r['path']: dict(r) for r in db.execute(
+                'SELECT f.*, s.signature FROM source_files AS f '
+                'LEFT JOIN source_file_stats AS s USING(root,path) WHERE f.root=?', (root,))}
             # Also see paths from pre-incremental indexes. A first refresh
             # rebuilds those paths individually and prunes deleted ones.
             old={r[0] for r in db.execute(
@@ -115,6 +123,7 @@ class Retrieval:
                 approvals.setdefault(record['path'],set()).add(record['new_hash'])
 
         seen=set(); replacements=[]; status_updates=[]; failures=[]; changed=0
+        signatures = []
         for rel,version,local in candidates:
             parts=Path(rel).parts
             # Memory is recalled through its own index and is never source evidence.
@@ -128,12 +137,24 @@ class Retrieval:
                 path=self.w.path(rel)
                 kind,project_id,status=self.w.classify(rel)
                 content=None
-                if version is None or rel in approvals:
-                    content=(path.read_bytes() if local is None else
-                             git.read_version(observation['commit'],local))
-                    sha=hashlib.sha256(content).hexdigest()
-                    version=version or sha
-                    if sha in approvals.get(rel,()):status='approved'
+                if local is None:
+                    stat = path.stat()
+                    signature = f'{stat.st_dev}/{stat.st_ino}/{stat.st_size}/{stat.st_mtime_ns}/{stat.st_ctime_ns}'
+                    if (not strict and before and before['signature'] == signature
+                            and before['version'] and not before['version'].startswith('git:')
+                            and before['error'] in (None, 'PARSE_UNSUPPORTED', 'PARSE_LIMITED')):
+                        version = before['version']
+                    else:
+                        content = path.read_bytes()
+                        version = hashlib.sha256(content).hexdigest()
+                        if not before or before['signature'] != signature:
+                            signatures.append((root, rel, signature))
+                    if version in approvals.get(rel, ()):
+                        status = 'approved'
+                elif rel in approvals:
+                    content = git.read_version(observation['commit'], local)
+                    if hashlib.sha256(content).hexdigest() in approvals[rel]:
+                        status = 'approved'
                 if before and before['version']==version:
                     if before['error'] is None:
                         if before['status']!=status:status_updates.append((status,rel))
@@ -154,7 +175,7 @@ class Retrieval:
                 if before and before['version']==version and before['error']==code:continue
             replacements.append((rel,version,status,code,rows))
         removed=(old|cached.keys())-seen
-        if not (replacements or removed or status_updates):return changed,failures
+        if not (replacements or removed or status_updates or signatures):return changed,failures
         with self.connect() as db:
             # No file access or parsing inside this write transaction. A path
             # and its FTS entries are replaced together even if a write fails.
@@ -167,6 +188,7 @@ class Retrieval:
             for status,rel in status_updates:
                 db.execute('UPDATE sources SET source_status=? WHERE source_path=?',(status,rel))
                 db.execute('UPDATE source_files SET status=? WHERE root=? AND path=?',(status,root,rel))
+            db.executemany('INSERT OR REPLACE INTO source_file_stats VALUES (?,?,?)', signatures)
         return changed,failures
 
     @staticmethod
@@ -175,6 +197,7 @@ class Retrieval:
             db.execute('DELETE FROM terms WHERE source_id IN (SELECT source_id FROM sources WHERE source_path=?)',(rel,))
             db.execute('DELETE FROM sources WHERE source_path=?',(rel,))
         db.execute('DELETE FROM source_files WHERE root=? AND path=?',(root,rel))
+        db.execute('DELETE FROM source_file_stats WHERE root=? AND path=?',(root,rel))
 
     def _extract_bytes(self, content, suffix):
         folder=self.w.path('.workspace/index/parse-temp');folder.mkdir(exist_ok=True)
@@ -217,10 +240,11 @@ class Retrieval:
             clauses.append('(scope_type=\'project\' AND project_id IN ('+','.join('?' for _ in scope['project_ids'])+'))')
             args.extend(scope['project_ids'])
         return '('+' OR '.join(clauses or ['0'])+')',args
-    def search(self,query,scope,limit=20):
+    def search(self,query,scope,limit=20,strict=False):
         if not isinstance(query,str) or not query.strip() or len(query)>500: raise Error('INVALID_ARGUMENT','Query length must be 1–500')
         clause,args=self.clause(scope)
-        report=self.update(scope)
+        if type(strict) is not bool: raise Error('INVALID_ARGUMENT','strict must be a boolean')
+        report=self.update(scope, strict=strict)
         with self.connect() as db:
             # Literal matching keeps punctuation and SQL/FTS operators as data.
             if len(query)>=3:
