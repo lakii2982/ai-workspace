@@ -187,8 +187,11 @@ class Service:
         if operation in ('save_artifact','receive_source'):
             args=dict(args)
             content=args.pop('content',None);encoded=args.pop('content_base64',None)
-            if (content is None)==(encoded is None):raise Error('INVALID_ARGUMENT','Supply text or base64, exclusively')
-            args['content']=base64.b64decode(encoded,validate=True) if encoded is not None else content.encode('utf-8')
+            copy_id=args.get('copy_id') if operation=='receive_source' else None
+            if sum(value is not None for value in (content,encoded,copy_id))!=1:
+                raise Error('INVALID_ARGUMENT','Supply text, base64, or controlled copy_id, exclusively')
+            if copy_id is None:
+                args['content']=base64.b64decode(encoded,validate=True) if encoded is not None else content.encode('utf-8')
             return (files.receive if operation=='receive_source' else Artifacts(w).save)(**args)
         if operation not in methods:raise Error('INVALID_ARGUMENT','Unknown operation')
         result=methods[operation](**args)

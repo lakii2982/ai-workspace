@@ -46,7 +46,7 @@ get_project_overview 提供任务分组与成果、问题、下一步；不会�
 
 正式发布前由 Agent 展示具体成果供确认。普通草稿保存在本任务工作目录，旧 hash 不匹配时拒绝覆盖；候选内容保留在 .workspace/history/conflicts。历史原内容保存在 .workspace/history/files，可查事件记录定位。
 
-附件无需转成聊天文本或 Base64。员工将附件上传到 `checkout_draft` 返回的本任务工作副本，再调用 `commit_draft(jid, copy_id)` 提交。该路径只接收已授权的任务副本，不读取任意本机路径。MCP 与 CLI 的大内容参数走标准输入，CLI 使用 `--params -` 从 stdin 读取 JSON，避免把正文放进命令行。
+附件无需转成聊天文本或 Base64。员工将附件上传到 `checkout_draft` 返回的本任务工作副本，再调用 `receive_source(jid, project_id, name, copy_id=...)`；实际字节会直接落入项目 `资料/` 成为 original，随后可由 `search_sources` 检索，且不会伪造一份工作稿。`commit_draft` 只用于真正的工作稿。该路径逐项校验任务、项目、文件名及副本位置，不读取任意本机路径。MCP 与 CLI 的大内容参数走标准输入，CLI 使用 `--params -` 从 stdin 读取 JSON，避免把正文放进命令行。
 
 复杂跨项目工作可在 scope.project_ids 显式绑定多个项目；当前跨项目专题独立身份尚未实现，topic_ids 必须为空。
 

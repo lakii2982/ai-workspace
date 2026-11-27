@@ -50,3 +50,43 @@ def test_checkout_commit_reads_only_controlled_copy_id(tmp_path):
     with pytest.raises(Error) as error:
         service.call('commit_draft',dict(jid=job['job_id'],copy_id='0'*32))
     assert error.value.code == 'NOT_FOUND'
+
+
+def test_controlled_copy_receives_two_megabytes_as_searchable_original(tmp_path, monkeypatch):
+    workspace,project,job=fixture(tmp_path);service=Service(tmp_path)
+    checkout=service.call('checkout_draft',dict(jid=job['job_id'],project_id=project['project_id'],
+                                                name='大型附件.txt',create=True))
+    line='附件原文 可检索\n'.encode()
+    payload=(line * ((2 * 1024 * 1024) // len(line) + 1))[:2 * 1024 * 1024]
+    workspace.path(checkout['path']).write_bytes(payload)
+    # MCP transfers only copy_id; the 2 MiB never enters its argument JSON.
+    monkeypatch.setenv('AIWS_WORKSPACE',str(tmp_path))
+    response=mcp_server.invoke('receive_source',dict(jid=job['job_id'],project_id=project['project_id'],
+        name='大型附件.txt',copy_id=checkout['copy_id']))
+    assert response['ok']
+    received=response['result']
+    assert received['status']=='original' and received['path']==project['path']+'/资料/大型附件.txt'
+    assert workspace.path(received['path']).read_bytes()==payload
+    assert not workspace.path(project['path']+'/工作/'+job['directory_name']+'/工作稿/大型附件.txt').exists()
+    scope={'include_company':False,'include_professional':False,'project_ids':[project['project_id']],'topic_ids':[]}
+    matches=service.call('search_sources',dict(query='附件原文',scope=scope))['matches']
+    assert matches and matches[0]['source_path']==received['path']
+    read=service.call('read_source',dict(source_id=matches[0]['source_id'],scope=scope))
+    assert read['sha256']==received['hash'] and '附件原文' in read['snippet']
+    record=json.loads(workspace.path('.workspace/edits/'+job['job_id']+'/'+checkout['copy_id']+'/record.json').read_text())
+    assert record['received']['hash']==received['hash']
+
+
+def test_controlled_copy_cannot_cross_project_even_in_same_job_scope(tmp_path):
+    workspace,first,job=fixture(tmp_path);second=workspace.project_create('另一项目')
+    scope={'include_company':False,'include_professional':False,
+           'project_ids':[first['project_id'],second['project_id']],'topic_ids':[]}
+    cross_job=Jobs(workspace).create('跨项目收件','必须不串项目',scope)
+    service=Service(tmp_path)
+    checkout=service.call('checkout_draft',dict(jid=cross_job['job_id'],project_id=first['project_id'],
+                                                name='边界.txt',create=True))
+    workspace.path(checkout['path']).write_text('只属于第一个项目')
+    with pytest.raises(Error) as error:
+        service.call('receive_source',dict(jid=cross_job['job_id'],project_id=second['project_id'],
+                                           name='边界.txt',copy_id=checkout['copy_id']))
+    assert error.value.code=='INVALID_SCOPE'

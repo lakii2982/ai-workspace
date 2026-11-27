@@ -90,6 +90,8 @@ class Desktop:
     def commit_draft(self, jid, copy_id, lease_token=None):
         self.guard(jid, lease_token)
         meta = self.w.path(Path('.workspace/edits', jid, identifier(copy_id), 'record.json'))
+        if not meta.is_file():
+            raise Error('NOT_FOUND', 'Controlled draft copy not found')
         record = load(meta)
         if 'committed' in record:
             return record['committed']
