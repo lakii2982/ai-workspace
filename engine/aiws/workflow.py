@@ -82,21 +82,31 @@ class Workflow:
             raise Error('INVALID_ARGUMENT', 'Handoff note and options are invalid')
         job = self.jobs.get(jid)
         from .context import Context
-        files=[]
+        files=[];draft_candidates=[]
         for pid in job['scope']['project_ids']:
             project=self.w.project_for(pid)
             draft=Context(self.w).primary_draft(project,job,None)
-            if draft:
+            if draft and draft.get('path'):
                 relative=project['path']+'/'+draft['path']
                 target=self.w.path(relative)
                 self.w.allowed(relative,job['scope'],drafts=True)
                 if target.is_file():
                     files.append({'project_id':pid,'path':relative,'hash':digest(target)})
+            elif draft and draft.get('state')=='ambiguous':
+                candidates=[]
+                for item in draft['candidates']:
+                    path=item['path']
+                    candidates.append({**item, 'read':dict(operation='read_project_file', project_id=pid,
+                                                          path=path)})
+                draft_candidates.append(dict(project_id=pid, candidates=candidates, hint=draft['hint'],
+                                             context=dict(operation='prepare_work_context', project_id=pid,
+                                                          jid=jid, detail='full')))
         handoff_id = uuid.uuid4().hex
         record = dict(schema_version=1, handoff_id=handoff_id, jid=jid, note=note.strip(),
                       requested_agent=requested_agent.strip() or None,
                       independent_review=independent_review, created_at=now(), status='prepared',
                       task=self.jobs.brief_record(job),files=files,
+                      draft_candidates=draft_candidates,
                       resume=dict(operation='resume_job', jid=jid))
         path = self.w.path(f'.workspace/handoffs/{jid}/{handoff_id}.json')
         put_json(path, record)

@@ -58,6 +58,31 @@ def test_handoff_distinguishes_session_claim_from_human_acknowledgement(tmp_path
     assert acknowledged['status'] == 'human_acknowledged'
 
 
+def test_handoff_lists_ambiguous_drafts_without_attaching_them_as_selected(tmp_path):
+    service=Service(tmp_path);service.call('init', {})
+    project=service.call('create_project', {'name':'并列报价'})
+    job=service.call('create_job', dict(title='报价', goal='复核报价', scope=scope(project['project_id'])))
+    first=service.call('write_work_file',dict(jid=job['job_id'],project_id=project['project_id'],
+        name='客户甲.html',content='<h1>客户甲报价</h1>'))
+    second=service.call('write_work_file',dict(jid=job['job_id'],project_id=project['project_id'],
+        name='客户乙.html',content='<h1>客户乙报价</h1>'))
+    current=service.call('resume_job', {'jid':job['job_id']})
+    service.call('checkpoint_job',dict(jid=job['job_id'],revision=current['revision'],patch={'context':{
+        'working_files':[
+            {'path':first['path'].removeprefix(project['path']+'/'),'role':'primary_draft'},
+            {'path':second['path'].removeprefix(project['path']+'/'),'role':'primary_draft'},
+        ]}}))
+    handoff=service.call('prepare_handoff',dict(jid=job['job_id'],note='请先选择要复核的报价稿'))
+    assert handoff['files']==[]
+    choices=handoff['draft_candidates'][0]
+    assert choices['project_id']==project['project_id']
+    assert {item['path'] for item in choices['candidates']}=={
+        first['path'].removeprefix(project['path']+'/'),second['path'].removeprefix(project['path']+'/')}
+    assert all(item['read']['operation']=='read_project_file' for item in choices['candidates'])
+    assert choices['context']['operation']=='prepare_work_context'
+    assert handoff['resume']==dict(operation='resume_job',jid=job['job_id'])
+
+
 def test_pending_publication_is_prioritized_and_completed_work_remains_locatable(tmp_path):
     service=Service(tmp_path);service.call('init', {})
     project=service.call('create_project', {'name':'发布确认'})

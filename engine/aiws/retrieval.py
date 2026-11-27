@@ -226,6 +226,8 @@ class Retrieval:
                 continue
             seen.add(rel)
             before=cached.get(rel)
+            retry_html = (Path(rel).suffix.lower() in ('.html', '.htm') and before
+                          and before['error'] == 'PARSE_UNSUPPORTED')
             rows=[];status=None;code=None
             try:
                 path=self.w.path(rel)
@@ -236,7 +238,8 @@ class Retrieval:
                     signature = f'{stat.st_dev}/{stat.st_ino}/{stat.st_size}/{stat.st_mtime_ns}/{stat.st_ctime_ns}'
                     if (not strict and before and before['signature'] == signature
                             and before['version'] and not before['version'].startswith('git:')
-                            and before['error'] in (None, 'PARSE_UNSUPPORTED', 'PARSE_LIMITED')):
+                            and before['error'] in (None, 'PARSE_UNSUPPORTED', 'PARSE_LIMITED')
+                            and not retry_html):
                         version = before['version']
                     else:
                         content = path.read_bytes()
@@ -253,7 +256,7 @@ class Retrieval:
                     if before['error'] is None:
                         if before['status']!=status:status_updates.append((status,rel))
                         continue
-                    if before['error'] in ('PARSE_UNSUPPORTED','PARSE_LIMITED'):
+                    if before['error'] in ('PARSE_UNSUPPORTED','PARSE_LIMITED') and not retry_html:
                         failures.append({'path':rel,'code':before['error']})
                         continue
                     # Transient I/O or runtime failures should not hide a
