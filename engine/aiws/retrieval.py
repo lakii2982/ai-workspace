@@ -18,16 +18,21 @@ def extract(path):
         return out
     if ext=='.xlsx':
         from openpyxl import load_workbook
+        from itertools import zip_longest
         formulas=load_workbook(path,read_only=True,data_only=False)
         values=load_workbook(path,read_only=True,data_only=True)
         out=[]
         try:
+            # Cached values stream row-by-row alongside the formulas: random
+            # access on a read-only sheet re-parses the XML up to the target
+            # row, which turns formula-heavy sheets quadratic.
             for sheet in formulas:
-                for row in sheet:
+                for row,cached_row in zip_longest(sheet.iter_rows(),values[sheet.title].iter_rows(),fillvalue=()):
+                    cached={c.coordinate:c.value for c in cached_row if c.value is not None}
                     for cell in row:
                         if cell.value is not None:
                             text=str(cell.value)
-                            if cell.data_type=='f': text+=f' [cached={values[sheet.title][cell.coordinate].value}; cache may be stale; not recalculated]'
+                            if cell.data_type=='f': text+=f' [cached={cached.get(cell.coordinate)}; cache may be stale; not recalculated]'
                             out.append((f'{sheet.title}!{cell.coordinate}',text))
         finally: formulas.close();values.close()
         return out
