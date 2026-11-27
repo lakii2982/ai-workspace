@@ -7,6 +7,8 @@ import subprocess
 import sys
 import tomllib
 
+from install_workspace import PREVIOUS_RULES
+
 
 def test_install_keeps_core_and_workspace_separate(tmp_path):
     checkout = Path(__file__).resolve().parents[2]
@@ -45,6 +47,7 @@ def test_install_keeps_core_and_workspace_separate(tmp_path):
     assert install["core"] == str(core)
     assert install["workspace"] == str(default)
     assert install["doctor"] == "healthy" and install["mcp"] == "verified"
+    assert install["clients"][0]["status"] == "awaiting_host_verification"
     assert install["clients"][0]["session_directories"] == [str(default), str(root)]
     root_market = json.loads((root / ".agents/plugins/marketplace.json").read_text())
     assert root_market["plugins"] == [{"name": "aiws", "source": {"source": "local", "path": "./Workspace/plugins/aiws"}, "category": "Productivity", "policy": {"installation": "AVAILABLE", "authentication": "ON_INSTALL"}}]
@@ -106,3 +109,7 @@ command = "existing"
     assert config["mcpServers"]["aiws"] == {"type": "stdio", **server}
     assert len(run("aiws", "project", "list")["result"]["items"]) == 1
     assert run("aiws", "--workspace", str(custom), "project", "list")["result"]["items"] == []
+
+
+def test_known_workspace_rules_version_is_eligible_for_upgrade():
+    assert "5c15bbe2d0d763e6706e0c5d0ab6c0717fefd1fcec3076b7e647c60565348e24" in PREVIOUS_RULES
