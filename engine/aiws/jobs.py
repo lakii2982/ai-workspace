@@ -311,18 +311,43 @@ class Artifacts:
                     archive=target.parent/'历史版本'/(target.stem+'_'+actual[:12]+target.suffix)
                     atomic(archive,target.read_bytes())
             put_json(self.w.path(f'.workspace/history/events/{event_id}.json'),{**event,'phase':'prepared'})
-            recovery_record=self.w.path(f'.workspace/recovery/{jid}/{event_id}.json')
+            recovery_key=hashlib.sha256(relative.encode()).hexdigest()
+            recovery_record=self.w.path(f'.workspace/recovery/{jid}/{recovery_key}.json')
             put_json(recovery_record,{**event,'phase':'prepared'})
             atomic(target,content)
             put_json(self.w.path(f'.workspace/history/events/{event_id}.json'),{**event,'phase':'committed'})
-            put_json(recovery_record,{**event,'phase':'committed'})
             artifact={**artifact,'hash':digest(target)}
             with self.w.lock('job:'+jid):
                 latest=self.jobs.get(jid)
                 latest['artifacts']=[a for a in latest['artifacts']
                                      if Path(a['path']).as_posix()!=relative]+[artifact]
                 latest['revision']+=1;latest['updated_at']=now();self.jobs.persist(latest)
+            recovery_record.unlink(missing_ok=True)
             return {**artifact,'replayed':False} if receive else artifact
+
+    def _classify_recovery(self, job, event):
+        """Classify an intent without changing bytes or job state."""
+        artifact=event.get('artifact')
+        if not isinstance(artifact,dict) or set(artifact)!={'path','hash','purpose','status'} or artifact['path']!=event.get('path'):
+            return None, 'invalid_journal'
+        try:
+            self.w.allowed(artifact['path'],job['scope'],drafts=True)
+            target=self.w.path(artifact['path'])
+            actual=digest(target) if target.is_file() else None
+        except Error:
+            return artifact, 'outside_scope'
+        current=next((a for a in job['artifacts'] if a['path']==artifact['path']),None)
+        if current == artifact:
+            return artifact, 'completed'
+        if actual == artifact['hash']:
+            # The disk has the intended version.  A missing record or the
+            # recorded old version are the only safe metadata repairs.
+            if current is None or current.get('hash') == event.get('old_hash'):
+                return artifact, 'recoverable'
+            return artifact, 'metadata_conflict'
+        if actual == event.get('old_hash') and (current is None or current.get('hash') == actual):
+            return artifact, 'not_written'
+        return artifact, 'changed_or_missing'
 
     def recovery_status(self, jid, job=None):
         """Read only this job's recovery journal for normal resume."""
@@ -330,21 +355,14 @@ class Artifacts:
         folder=self.w.path(f'.workspace/recovery/{jid}')
         records=[] if not folder.is_dir() else [load(path) for path in sorted(folder.glob('*.json'))]
         job=job or self.jobs.get(jid)
-        known={a['path']:a for a in job['artifacts']}
         recoverable=[];pending=[]
         for event in records:
-            if event.get('phase')!='committed' or event.get('job_id')!=jid:
+            if event.get('job_id')!=jid:
                 continue
-            artifact=event.get('artifact')
-            if not isinstance(artifact,dict) or artifact.get('path') in known:
-                continue
-            try:
-                self.w.allowed(artifact['path'],job['scope'],drafts=True)
-                path=self.w.path(artifact['path'])
-                state='recoverable' if path.is_file() and digest(path)==artifact.get('hash') else 'changed_or_missing'
-            except Error:
-                state='outside_scope'
-            (recoverable if state=='recoverable' else pending).append({'path':artifact.get('path'),'state':state})
+            artifact,state=self._classify_recovery(job,event)
+            if state in ('completed','not_written'):continue
+            item={'path':artifact.get('path') if artifact else event.get('path'),'state':state}
+            (recoverable if state=='recoverable' else pending).append(item)
         return {'recoverable':recoverable,'pending':pending}
 
     def recover(self, jid, lease_token=None):
@@ -360,7 +378,6 @@ class Artifacts:
         with self.w.lock('job:'+jid):
             job=self.jobs.get(jid)
             check_lease(job,lease_token,require=enabled(self.w))
-            known={a['path']:a for a in job['artifacts']}
             recovered=[];pending=[]
             recovery_folder=self.w.path(f'.workspace/recovery/{jid}')
             # New saves have a job-local journal so resume is bounded.  The
@@ -369,34 +386,23 @@ class Artifacts:
                          else sorted(self.w.path('.workspace/history/events').glob('*.json')))
             for event_path in event_paths:
                 event=load(event_path)
-                if event.get('job_id')!=jid or event.get('phase')!='committed':
+                if event.get('job_id')!=jid:
                     continue
-                artifact=event.get('artifact')
-                if not isinstance(artifact,dict):
+                artifact,state=self._classify_recovery(job,event)
+                if state in ('completed','not_written'):
+                    if recovery_folder.is_dir() and event_path.is_relative_to(recovery_folder):event_path.unlink(missing_ok=True)
                     continue
-                if set(artifact)!={'path','hash','purpose','status'} or artifact['path']!=event.get('path'):
-                    pending.append({'path':event.get('path'),'state':'invalid_journal'})
+                if state!='recoverable':
+                    pending.append({'path':artifact.get('path') if artifact else event.get('path'),'state':state})
                     continue
-                try:
-                    self.w.allowed(artifact['path'],job['scope'],drafts=True)
-                    path=self.w.path(artifact['path'])
-                    if not path.is_file() or digest(path)!=artifact['hash']:
-                        pending.append({'path':artifact['path'],'state':'changed_or_missing'})
-                        continue
-                except Error:
-                    pending.append({'path':artifact['path'],'state':'outside_scope'})
-                    continue
-                current=known.get(artifact['path'])
-                if current == artifact:
-                    continue
-                if current is not None:
-                    pending.append({'path':artifact['path'],'state':'metadata_conflict'})
-                    continue
-                known[artifact['path']]=artifact
+                job['artifacts']=[a for a in job['artifacts'] if a['path']!=artifact['path']]+[artifact]
                 recovered.append(artifact)
             if recovered:
-                job['artifacts']=list(known.values())
                 job['revision']+=1;job['updated_at']=now()
                 self.jobs.persist(job)
+                for event_path in event_paths:
+                    if recovery_folder.is_dir() and event_path.is_relative_to(recovery_folder):
+                        artifact,state=self._classify_recovery(job,load(event_path))
+                        if state=='completed':event_path.unlink(missing_ok=True)
             return {'job_id':jid,'recovered':recovered,'pending':pending,
                     'revision':job['revision']}

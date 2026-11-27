@@ -55,3 +55,34 @@ def test_recovery_ignores_forged_out_of_scope_journal(tmp_path):
     result=Service(tmp_path).call('recover_artifacts',{'jid':j['job_id']})
     assert result['recovered']==[]
     assert result['pending']==[{'path':'公司知识/公司档案/x.md','state':'outside_scope'}]
+
+
+def test_successful_save_cleans_path_intent_and_recovery_handles_overwrite(tmp_path, monkeypatch):
+    w,p,j=workspace(tmp_path)
+    relative=p['path']+'/工作/'+j['directory_name']+'/工作稿/方案.md'
+    first=Artifacts(w).save(j['job_id'],relative,b'v1')
+    assert not list(w.path('.workspace/recovery/'+j['job_id']).glob('*.json'))
+    actual=Jobs.persist
+    monkeypatch.setattr(Jobs,'persist',lambda self,record: (_ for _ in ()).throw(Error('REMOTE_UNCERTAIN','lost')))
+    with pytest.raises(Error):
+        Artifacts(w).save(j['job_id'],relative,b'v2',expected_hash=first['hash'])
+    monkeypatch.setattr(Jobs,'persist',actual)
+    repaired=Service(tmp_path).call('recover_artifacts',{'jid':j['job_id']})
+    assert repaired['recovered'][0]['hash'] != first['hash']
+    assert Jobs(w).get(j['job_id'])['artifacts']==repaired['recovered']
+    assert not list(w.path('.workspace/recovery/'+j['job_id']).glob('*.json'))
+
+
+def test_prepared_intent_after_disk_write_is_recoverable_but_manual_bytes_are_not(tmp_path):
+    w,p,j=workspace(tmp_path)
+    relative=p['path']+'/工作/'+j['directory_name']+'/工作稿/方案.md'
+    target=w.path(relative);target.parent.mkdir(parents=True);target.write_bytes(b'new')
+    from aiws.core import put_json, digest
+    artifact={'path':relative,'hash':digest(target),'purpose':'draft','status':'draft'}
+    put_json(w.path('.workspace/recovery/'+j['job_id']+'/one.json'),
+             {'schema_version':1,'job_id':j['job_id'],'path':relative,'old_hash':None,
+              'new_hash':artifact['hash'],'phase':'prepared','artifact':artifact})
+    assert Service(tmp_path).call('resume_job',{'jid':j['job_id']})['recovery']['recoverable']
+    target.write_bytes(b'human')
+    status=Service(tmp_path).call('resume_job',{'jid':j['job_id']})['recovery']
+    assert status['recoverable']==[] and status['pending']==[{'path':relative,'state':'changed_or_missing'}]
