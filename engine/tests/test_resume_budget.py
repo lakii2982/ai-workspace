@@ -63,3 +63,23 @@ def test_default_resume_serializes_under_mcp_budget_and_full_expands(tmp_path):
     full=service.call('resume_job',{'jid':j['job_id'],'detail':'full'})
     assert len(full['work_context']['memory']['items'])==100
     assert len(full['work_context']['task_context']['next_steps'])==40
+
+
+def test_extreme_brief_keeps_blockers_draft_and_publication_identity(tmp_path):
+    w,p,j=setup(tmp_path);service=Service(tmp_path)
+    draft=w.path(p['path']+'/工作/'+j['directory_name']+'/工作稿/主稿.md')
+    draft.parent.mkdir(parents=True);draft.write_text('主稿')
+    huge='中文内容'*1200
+    j=Jobs(w).checkpoint(j['job_id'],j['revision'],{'goal':huge,'context':{
+        'working_files':[{'path':draft.relative_to(w.path(p['path'])).as_posix(),'role':'主稿'}],
+        'resume_note':huge},'next_steps':[huge]*20,'open_issues':[huge]*20,
+        'decisions':[huge]*20})
+    decision=service.call('request_publication',{'jid':j['job_id'],'project_id':p['project_id'],
+        'name':'主稿.md','target_name':'成果.md','reason':huge})
+    result=service.call('resume_job',{'jid':j['job_id']})
+    assert len(json.dumps({'ok':True,'result':result},ensure_ascii=False).encode()) <= 16*1024
+    assert result['work_context']['primary_draft']['path'].endswith('主稿.md')
+    assert result['work_context']['attention']['unresolved_issue_total']==20
+    item=result['publication_decisions'][p['project_id']]['items'][0]
+    assert item['decision_id']==decision['decision_id'] and item['state']=='pending'
+    assert result['brief_budget']['expand']['detail']=='full'

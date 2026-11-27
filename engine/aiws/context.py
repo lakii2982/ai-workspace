@@ -15,6 +15,16 @@ class Context:
 
     def tasks(self, project_id):
         jobs = Jobs(self.w)
+        from .remote_store import enabled
+        # Remote authority keeps its paged query semantics.  The local scan
+        # optimization must not turn an overview into one remote read per job.
+        if enabled(self.w):
+            result, offset = [], 0
+            while True:
+                page=jobs.query(project_id=project_id,status=None,limit=100,offset=offset)
+                result.extend(jobs.get(row['job_id']) for row in page['items'])
+                if not page['has_more']:return result
+                offset=page['next_offset']
         # An overview requires complete records. Repeated query pages would
         # rescan all job JSON files and then reread their selected records.
         records, _ = jobs.scan()

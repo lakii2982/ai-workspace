@@ -54,7 +54,7 @@ DELIVERABLE_REQUIRED：任务转completed时，若 工作/JOB/工作稿/ 仍有�
 ## 任务、时间线和飞书适配接口
 
 - list_jobs: project_id/query/status 可选，limit 默认20最大100，offset默认0。返回 items/has_more/next_offset；不返回附件和历史。旧完整列表显式 call list_jobs_full。
-- resume_job: detail默认brief；完整材料与hash校验需detail=full。brief明确返回omitted、expand、integrity，不能把未校验解释为校验通过。字段有长度和条数上限；被省略的约束执行前须展开。
+- resume_job: detail默认brief；完整材料与hash校验需detail=full。brief明确返回omitted、expand、integrity，不能把未校验解释为校验通过。常规 brief 保持原形；仅超过 16KiB MCP 预算时确定性压缩长文本和列表，保留主稿、未完/阻塞计数、待审出版身份及 `brief_budget.expand`。被省略的约束执行前须展开。
 - append_timeline: project_id/event_id/event_date/record_date/kind/summary/status/impact/owner/next_action/sources/expected_hash。项目内原子追加；旧hash冲突拒绝；相同事件重试去重；不确认建议为事实。
 - feishu_query: entity=projects或jobs，key/value精确过滤，limit默认20最大100，offset分页。
 - `.workspace/feishu.json` 保存资源坐标，不存凭据。CLI用户凭据由lark-cli维护。单协调工作空间锁不提供多主机并发保障。

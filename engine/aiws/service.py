@@ -1,5 +1,6 @@
 import base64
 import fcntl
+import json
 from .core import Workspace, Error
 from .retrieval import Retrieval
 from .jobs import Jobs, Artifacts
@@ -24,6 +25,49 @@ _JOB_WRITES = {
 }
 _PROJECT_OPERATIONS = {'get_project', 'update_project', 'append_timeline', 'initialize_project_git',
                        'save_memory_note', 'delete_memory_note'}
+
+BRIEF_BYTES = 16 * 1024
+
+def bound_brief_payload(payload):
+    """Keep the normal brief response unchanged unless it exceeds MCP budget."""
+    encoded=lambda value: json.dumps(value,ensure_ascii=False,separators=(',',':')).encode()
+    if len(encoded(payload)) <= BRIEF_BYTES:return payload
+    result=json.loads(json.dumps(payload,ensure_ascii=False))
+    def short(value,limit=240):
+        return value if not isinstance(value,str) or len(value)<=limit else value[:limit]+'…'
+    def compact(value, limit=240):
+        if isinstance(value,str):return short(value,limit)
+        if isinstance(value,list):return [compact(item,limit) for item in value[:8]]
+        if isinstance(value,dict):return {key:compact(item,limit) for key,item in value.items()}
+        return value
+    for key in ('title','goal'):
+        result[key]=short(result.get(key),400)
+    work=result.get('work_context',{})
+    task=work.get('task_context') or {}
+    for key in ('title','goal'):
+        task[key]=short(task.get(key),400)
+    context=task.get('context')
+    if isinstance(context,dict):
+        task['context']={key:context[key] for key in ('working_on','resume_note','working_files') if key in context}
+        task['context_omitted']=True
+    decisions=result.get('publication_decisions',{})
+    for page in decisions.values():
+        if not isinstance(page,dict):continue
+        items=page.get('items',[])
+        page['items']=[{key:short(item.get(key),160) for key in
+                        ('decision_id','state','name','source_hash','created_at','reason') if key in item}
+                       for item in items[:8]]
+        page['omitted']=max(0,len(items)-len(page['items']))
+    # Memory evidence and publication history are expandable.  Keep a stable
+    # indicator rather than silently dropping them when an extreme job remains.
+    work['memory_references']=[{'event_id':item.get('event_id'),'state':item.get('state')}
+                               for item in work.get('memory_references',[])[:4]]
+    result=compact(result)
+    if len(encoded(result)) > BRIEF_BYTES:
+        result=compact(result,48)
+    result['brief_budget']={'bytes':len(encoded(result)),'limit':BRIEF_BYTES,
+                            'expand':{'operation':'resume_job','jid':result.get('job_id'),'detail':'full'}}
+    return result
 
 class Service:
     def __init__(self,root):self.w=Workspace(root)
@@ -96,7 +140,7 @@ class Service:
                 }
                 if len(job['scope']['project_ids'])!=1 or not result['work_context'].get('observation'):
                     result['context_entry']=dict(operation='prepare_work_context',jid=jid)
-                return result
+                return bound_brief_payload(result) if detail=='brief' else result
 
         def resume_session(session_id):
             return resume(flow.session_job_id(session_id))
