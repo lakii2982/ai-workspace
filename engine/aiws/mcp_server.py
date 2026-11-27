@@ -83,7 +83,7 @@ def record_task_feedback(jid:str,feedback:str,lease_token:str|None=None)->dict:
     return invoke('record_task_feedback',dict(jid=jid,feedback=feedback,lease_token=lease_token))
 @server.tool()
 def prepare_handoff(jid:str,note:str,requested_agent:str='',independent_review:bool=False)->dict:
-    """Make a portable continuation package. It is not delivered until a bound receiving session accepts it."""
+    """Prepare files and review notes for manual handoff. No external application is contacted."""
     return invoke('prepare_handoff',dict(jid=jid,note=note,requested_agent=requested_agent,independent_review=independent_review))
 @server.tool(annotations=ToolAnnotations(readOnlyHint=True, destructiveHint=False))
 def read_handoff(jid:str,handoff_id:str)->dict:
