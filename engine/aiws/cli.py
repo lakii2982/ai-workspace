@@ -1,6 +1,7 @@
 import argparse
 import json
 import os
+import sys
 import traceback
 from .core import Error
 from .service import Service
@@ -18,7 +19,8 @@ def main():
     a=p.parse_args()
     try:
         if not a.workspace:raise Error('NOT_FOUND','Specify --workspace or AIWS_WORKSPACE')
-        args=json.loads(a.params)
+        params=sys.stdin.read() if a.params == '-' else a.params
+        args=json.loads(params)
         if not isinstance(args,dict):raise Error('INVALID_ARGUMENT','params must be an object')
         if a.command in ['init','backup','restore','doctor']:op=a.command
         elif a.command=='call':op=a.action

@@ -41,8 +41,8 @@ def invoke(operation,args,timeout=None):
     limit=timeout or timeout_for(operation)
     entry=[os.environ['AIWS_LAUNCHER']] if os.environ.get('AIWS_LAUNCHER') else [sys.executable,'-m','aiws']
     try:
-        result=subprocess.run([*entry,'--workspace',workspace,'call',operation,
-                               '--params',json.dumps(args,ensure_ascii=False)],
+        result=subprocess.run([*entry,'--workspace',workspace,'call',operation,'--params','-'],
+                              input=json.dumps(args,ensure_ascii=False),
                               capture_output=True,text=True,timeout=limit)
     except subprocess.TimeoutExpired:
         return {'ok':False,'error':{'code':'TIMEOUT','message':f'{operation} exceeded {limit}s; run doctor before retrying'}}
