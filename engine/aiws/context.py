@@ -52,7 +52,9 @@ class Context:
         p = self.w.project_for(project_id)
         jobs = self.tasks(project_id)
         counts = dict(Counter(j['status'] for j in jobs))
-        order = {'in_progress': 0, 'review': 1, 'blocked': 2, 'new': 3}
+        # A pending acceptance is more urgent than the newest ongoing work. Completed
+        # history is excluded before this ordering, so it cannot hide a review item.
+        order = {'review': 0, 'blocked': 1, 'in_progress': 2, 'new': 3}
         active = sorted((j for j in jobs if j['status'] in order),
                         key=lambda j: j['updated_at'], reverse=True)
         active.sort(key=lambda j: order[j['status']])
