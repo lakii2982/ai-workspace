@@ -141,7 +141,8 @@ class Desktop:
         found = [record for record in found if not state or record['state'] == state]
         found.sort(key=lambda record: record.get('created_at', ''), reverse=True)
         found.sort(key=lambda record: record['state'] != 'pending')
-        return page(found, limit, offset)
+        return {**page(found,limit,offset),'total':len(found),
+                'pending_total':sum(record['state']=='pending' for record in found)}
 
     def record_sent(self, jid, project_id, name, source_hash, channel='', evidence_path=None,
                     evidence_hash=None, lease_token=None):

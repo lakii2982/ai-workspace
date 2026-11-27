@@ -32,7 +32,9 @@ BRIEF_BYTES = 16 * 1024
 def bound_brief_payload(payload):
     """Keep the normal brief response unchanged unless it exceeds MCP budget."""
     encoded=lambda value: json.dumps(value,ensure_ascii=False,separators=(',',':')).encode()
-    if len(encoded(payload)) <= BRIEF_BYTES:return payload
+    def size(value):
+        return len(encoded({'ok':True,'result':value}))
+    if size(payload) <= BRIEF_BYTES:return payload
     def text(value, limit=240):
         return value if not isinstance(value,str) or len(value)<=limit else value[:limit]+'…'
     jid=payload['job_id']
@@ -50,7 +52,7 @@ def bound_brief_payload(payload):
         # Identity and reviewed hash are operational fields. Do not truncate them.
         pending=next((item for item in items if item.get('state')=='pending'), items[0] if items else None)
         publications[project_id]={'total':page.get('total',len(items)) if isinstance(page,dict) else len(items),
-                                  'pending_total':sum(item.get('state')=='pending' for item in items),
+                                  'pending_total':page['pending_total'],
                                   'items':([{key:pending[key] for key in ('decision_id','state','source_hash','name') if key in pending}]
                                            if pending else []), 'expand':{'operation':'list_decisions','project_id':project_id,'jid':jid}}
     compact={'job_id':jid,'title':text(payload.get('title')),'goal':text(payload.get('goal')),
@@ -64,16 +66,17 @@ def bound_brief_payload(payload):
                      'open_issue_total':work.get('attention',{}).get('unresolved_issue_total',len(task.get('open_issues',[])))},
              'primary_draft':primary,'publication_decisions':publications,
              'recovery':payload.get('recovery'),'expand':expand}
-    if len(encoded(compact)) > BRIEF_BYTES:
+    compact['brief_budget']={'limit':BRIEF_BYTES,'expand':expand}
+    if size(compact) > BRIEF_BYTES:
         # Last resort remains executable. Paths and prose are expandable while
         # stable task, decision and content-hash identities remain intact.
-        first_project=next(iter(publications),None)
+        first_project=next((pid for pid,data in publications.items() if data['pending_total']),next(iter(publications),None))
         compact={'job_id':jid,'status':payload.get('status'),'revision':payload.get('revision'),
                  'open_issue_total':compact['task']['open_issue_total'],
                  'pending_review_total':work.get('attention',{}).get('pending_review_total',0),
+                 'pending_publications':sum(group['pending_total'] for group in publications.values()),
                  'publication_decision':publications.get(first_project) if first_project else None,
-                 'expand':expand}
-    compact['brief_budget']={'bytes':len(encoded(compact)),'limit':BRIEF_BYTES,'expand':expand}
+                 'expand':expand,'brief_budget':{'limit':BRIEF_BYTES,'expand':expand}}
     return compact
 
 class Service:

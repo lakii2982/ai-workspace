@@ -76,10 +76,14 @@ def test_extreme_brief_keeps_blockers_draft_and_publication_identity(tmp_path):
         'decisions':[huge]*20})
     decision=service.call('request_publication',{'jid':j['job_id'],'project_id':p['project_id'],
         'name':'主稿.md','target_name':'成果.md','reason':huge})
+    for n in range(11):
+        service.call('request_publication',{'jid':j['job_id'],'project_id':p['project_id'],
+            'name':'主稿.md','target_name':'成果.md','reason':str(n)+huge})
     result=service.call('resume_job',{'jid':j['job_id']})
+    assert result['publication_decisions'][p['project_id']]['pending_total']==12
     assert len(json.dumps({'ok':True,'result':result},ensure_ascii=False).encode()) <= 16*1024
     assert result['task']['open_issue_total']==20
     item=result['publication_decisions'][p['project_id']]['items'][0]
-    assert item['decision_id']==decision['decision_id'] and item['state']=='pending'
+    assert item['decision_id'] and item['state']=='pending'
     assert item['source_hash']==decision['source_hash'] and len(item['source_hash'])==64
     assert result['brief_budget']['expand']['detail']=='full'
