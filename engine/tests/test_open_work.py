@@ -73,13 +73,13 @@ def test_candidates_scan_tasks_by_query_without_writing(tmp_path):
     assert snapshot(w) == before
 
 
-def test_explicit_project_opens_sole_active_task_and_honors_alias(tmp_path):
+def test_explicit_project_query_opens_sole_matching_task_and_honors_alias(tmp_path):
     w, (p,) = workspace(tmp_path, ['周报项目'])
     s = Service(tmp_path)
     job = Jobs(w).create('采购周报', '输出周报初稿', scope(p['project_id']))
     aliases(s, p, 'weekly')
     for name in ('周报项目', 'weekly', 'PRJ-0001', 'prj-0001'):
-        result = s.call('open_work', dict(intent='继续周报', project=name))
+        result = s.call('open_work', dict(intent='继续周报', project=name, query='采购周报'))
         assert result['status'] == 'opened', name
         assert result['match'] == 'unique'
         assert result['work']['job_id'] == job['job_id']
@@ -191,6 +191,32 @@ def test_create_project_only_when_explicit_and_unmatched(tmp_path):
     assert len(w.projects()) == 1
 
 
+def test_project_creation_can_retry_the_same_request_after_task_creation_fails(tmp_path, monkeypatch):
+    w, _ = workspace(tmp_path)
+    original_create = Jobs.create
+    attempts = 0
+
+    def fail_once(self, *args, **kwargs):
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            raise Error('REMOTE_UNCERTAIN', 'Task creation interrupted; retry the request')
+        return original_create(self, *args, **kwargs)
+
+    monkeypatch.setattr(Jobs, 'create', fail_once)
+    request = dict(intent='开始审计初稿', project='审计项目', create_project=True,
+                   new_task=True, request_id='retry-project-1')
+    with pytest.raises(Error) as raised:
+        Service(tmp_path).call('open_work', request)
+    assert raised.value.code == 'REMOTE_UNCERTAIN'
+    assert [p['name'] for p in w.projects()] == ['审计项目']
+    retry = Service(tmp_path).call('open_work', request)
+    assert retry['status'] == 'opened'
+    assert retry['created'] == {'project': False, 'task': True}
+    assert retry['request_id'] == 'retry-project-1'
+    assert len(w.projects()) == 1 and len(Jobs(w).list()) == 1
+
+
 def test_alias_and_unknown_project_choices_never_write(tmp_path):
     w, (p1, p2) = workspace(tmp_path, ['项目甲', '项目乙'])
     s = Service(tmp_path)
@@ -206,11 +232,11 @@ def test_alias_and_unknown_project_choices_never_write(tmp_path):
     assert snapshot(w) == before
 
 
-def test_session_binding_continues_and_never_switches_silently(tmp_path):
+def test_session_binding_keeps_current_work_and_switches_after_explicit_choice(tmp_path):
     w, (p,) = workspace(tmp_path, ['会话项目'])
     s = Service(tmp_path)
     first = Jobs(w).create('任务一', '目标一', scope(p['project_id']))
-    opened = s.call('open_work', dict(intent='做任务一', project='会话项目', session_id='chat-A'))
+    opened = s.call('open_work', dict(intent='做任务一', project='会话项目', query='任务一', session_id='chat-A'))
     assert opened['session_binding'] == dict(session_id='chat-A', state='bound', jid=first['job_id'])
     # A previously bound task proceeds on its own.
     again = s.call('open_work', dict(intent='接着做', session_id='chat-A'))
@@ -220,15 +246,15 @@ def test_session_binding_continues_and_never_switches_silently(tmp_path):
     switched = s.call('open_work', dict(intent='做任务二', session_id='chat-A', jid=second['job_id']))
     assert switched['work']['job_id'] == second['job_id']
     binding = switched['session_binding']
-    assert binding['state'] == 'elsewhere' and binding['jid'] == first['job_id']
-    assert binding['switch'] == dict(operation='bind_session', session_id='chat-A', jid=second['job_id'])
-    # The old session binding was not hijacked.
-    assert s.call('resume_session', dict(session_id='chat-A'))['job_id'] == first['job_id']
-    # Candidate paths report the existing binding without touching it.
+    assert binding == dict(session_id='chat-A', state='switched', jid=second['job_id'])
+    # The explicit choice becomes the following turn's continuation.
+    assert s.call('resume_session', dict(session_id='chat-A'))['job_id'] == second['job_id']
+    # Repeating the selected project retains its exact session binding even
+    # after another active task has appeared there.
     before = snapshot(w)
-    choices = s.call('open_work', dict(intent='看看别的事', project='会话项目', session_id='chat-A'))
-    assert choices['status'] == 'candidates' and choices['reason'] == 'ambiguous_tasks'
-    assert choices['session_binding'] == dict(session_id='chat-A', state='bound', jid=first['job_id'])
+    retained = s.call('open_work', dict(intent='接着做', project='会话项目', session_id='chat-A'))
+    assert retained['status'] == 'opened' and retained['work']['job_id'] == second['job_id']
+    assert retained['session_binding'] == dict(session_id='chat-A', state='kept', jid=second['job_id'])
     assert snapshot(w) == before
 
 
@@ -245,12 +271,28 @@ def test_multi_project_task_requires_explicit_destination(tmp_path):
     job = Jobs(w).create('双项目任务', '目标', scope(p1['project_id'], p2['project_id']))
     s = Service(tmp_path)
     result = s.call('open_work', dict(intent='推进双项目', jid=job['job_id']))
-    assert result['status'] == 'opened'
-    assert result['work']['work_context']['project_candidates'] == [p1['project_id'], p2['project_id']]
-    assert result['work']['context_entry']['operation'] == 'prepare_work_context'
-    assert result['pending_updates']
-    context = s.call('prepare_work_context', dict(jid=job['job_id'], project_id=p2['project_id']))
-    assert context['identity']['project_id'] == p2['project_id']
+    assert result['status'] == 'candidates'
+    assert result['reason'] == 'choose_project_for_task'
+    assert {p['project_id'] for p in result['projects']} == {p1['project_id'], p2['project_id']}
+    opened = s.call('open_work', dict(intent='推进双项目', jid=job['job_id'], project=p2['project_id']))
+    assert opened['status'] == 'opened' and opened['project_id'] == p2['project_id']
+    assert opened['work']['work_context']['identity']['project_id'] == p2['project_id']
+
+
+def test_explicit_task_must_belong_to_selected_project(tmp_path):
+    w, (p1, p2) = workspace(tmp_path, ['甲项目', '乙项目'])
+    job = Jobs(w).create('乙项目工作', '只属于乙', scope(p2['project_id']))
+    with pytest.raises(Error) as raised:
+        Service(tmp_path).call('open_work', dict(intent='继续', jid=job['job_id'], project=p1['project_id']))
+    assert raised.value.code == 'INVALID_SCOPE'
+
+
+def test_project_only_never_opens_an_unrelated_sole_task(tmp_path):
+    w, (p,) = workspace(tmp_path, ['采购项目'])
+    job = Jobs(w).create('历史盘点', '旧工作', scope(p['project_id']))
+    result = Service(tmp_path).call('open_work', dict(intent='写采购周报', project=p['project_id']))
+    assert result['status'] == 'candidates' and result['reason'] == 'ambiguous_tasks'
+    assert result['tasks'][0]['job_id'] == job['job_id']
 
 
 def test_legacy_job_and_session_still_open(tmp_path):
@@ -271,6 +313,77 @@ def test_legacy_job_and_session_still_open(tmp_path):
     assert opened['work']['directories'][0]['work'].endswith('工作/' + job['job_id'])
     from_session = s.call('open_work', dict(intent='换个会话名接续', session_id='legacy-chat'))
     assert from_session['work']['job_id'] == job['job_id']
+
+
+def test_remote_mode_open_work_uses_existing_contracts(tmp_path, monkeypatch):
+    """Remote authority uses exact project filters and the normal request replay."""
+    import copy
+
+    from aiws.feishu import Feishu
+    from aiws.maintenance import Maintenance
+
+    w = Workspace(tmp_path)
+    w.init()
+    project = w.project_create('远端项目')
+    put_json(w.path('.workspace/feishu.json'), dict(schema_version=1, mode='staging',
+                                                    base_token='test', projects_table='projects',
+                                                    jobs_table='jobs'))
+    rows = {'projects': {}, 'jobs': {}}
+    filters_seen = []
+
+    def satisfies(row, condition):
+        field, operator, expected = condition
+        actual = row.get(field)
+        if operator == '==':
+            return actual == expected
+        if operator == 'intersects':
+            values = actual if isinstance(actual, list) else str(actual or '').split('\n')
+            expected_values = expected if isinstance(expected, list) else [expected]
+            return any(item in values for item in expected_values)
+        if operator == 'disjoint':
+            values = actual if isinstance(actual, list) else [actual]
+            return not any(item in values for item in expected)
+        raise AssertionError('unexpected filter: ' + repr(condition))
+
+    def read(self, entity, key=None, value=None, limit=20, offset=0, conditions=None, **kwargs):
+        filters = list(conditions or [])
+        if key is not None:
+            filters.append([key, '==', value])
+        filters_seen.extend((entity, condition) for condition in filters)
+        result = [row for row in rows[entity].values()
+                  if all(satisfies(row, condition) for condition in filters)]
+        return dict(items=copy.deepcopy(result[offset:offset + limit]),
+                    has_more=len(result) > offset + limit)
+
+    def command(self, action, table, args):
+        fields = json.loads(args[args.index('--json') + 1])
+        rid = args[args.index('--record-id') + 1] if '--record-id' in args else 'rec' + str(len(rows[table]) + 1)
+        rows[table][rid] = {'record_id': rid, **fields}
+        return dict(ok=True, data={'record': {'record_id_list': [rid]}})
+
+    monkeypatch.setattr(Feishu, 'rows', read)
+    monkeypatch.setattr(Feishu, 'command', command)
+    Maintenance(w).backup()
+    Service(tmp_path).call('migrate_feishu', dict(activate=True))
+    s = Service(tmp_path)
+    before = snapshot(w)
+    candidates = s.call('open_work', dict(intent='远端工作', project='远端项目'))
+    assert candidates['status'] == 'candidates' and candidates['reason'] == 'no_task'
+    assert candidates['projects'][0]['project_id'] == project['project_id']
+    assert ('projects', ['项目名称', '==', '远端项目']) in filters_seen
+    assert snapshot(w) == before
+    opened = s.call('open_work', dict(intent='远端工作', project='远端项目',
+                                      new_task=True, request_id='remote-entry-1'))
+    jid = opened['work']['job_id']
+    assert opened['status'] == 'opened' and opened['created'] == {'project': False, 'task': True}
+    assert opened['work']['goal'] == '远端工作'
+    assert opened['work']['revision'] == 1
+    remote_row = next(r for r in rows['jobs'].values() if r['任务ID'] == jid)
+    assert remote_row['操作ID']
+    replay = s.call('open_work', dict(intent='远端工作', project='远端项目',
+                                      new_task=True, request_id='remote-entry-1'))
+    assert replay['work']['job_id'] == jid and replay['replayed'] is True
+    assert len(rows['jobs']) == 1
 
 
 def test_cli_call_open_work(tmp_path):

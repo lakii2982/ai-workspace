@@ -40,12 +40,13 @@ class Entry:
             raise Error('INVALID_ARGUMENT', 'Session ID required')
         bound_jid = self.flow.session_job_id(session_id, missing_ok=True) if session_id else None
 
-        # 1) An explicit task is honored exactly as supplied.
+        # 1) An explicit task must agree with any explicit project.
         if jid is not None:
-            return self._opened(intent, jid, session_id=session_id, bound_jid=bound_jid)
+            return self._open_jid(intent, jid, project=project, session_id=session_id,
+                                  bound_jid=bound_jid, switch_session=True)
         # 2) An explicit project name, alias or ID narrows the destination.
         if project is not None:
-            matches = self._match_projects(project)
+            matches = self.flow.project_matches(project)
             if len(matches) > 1:
                 return self._choices(intent, 'ambiguous_projects', projects=self._project_rows(matches),
                                      has_more_projects=len(matches) > CANDIDATE_LIMIT,
@@ -70,7 +71,7 @@ class Entry:
                                       created_project=True)
         # 3) A previously bound task proceeds as prior work.
         if bound_jid is not None:
-            return self._opened(intent, bound_jid, session_id=session_id, bound_jid=bound_jid)
+            return self._open_jid(intent, bound_jid, session_id=session_id, bound_jid=bound_jid)
         # 4) Unknown and unbound: readable candidates only, nothing is chosen or created.
         page = self.w.project_query(limit=CANDIDATE_LIMIT)
         return self._choices(intent, 'no_project', projects=page['items'],
@@ -86,8 +87,13 @@ class Entry:
                                      session_id=session_id)
         found = self.jobs.query(project_id=pid, query=query, limit=CANDIDATE_LIMIT)
         rows = self._task_rows(found['items'])
-        if len(rows) == 1 and not found['has_more']:
-            return self._opened(intent, rows[0]['job_id'], session_id=session_id, bound_jid=bound_jid)
+        bound = next((row for row in rows if row['job_id'] == bound_jid), None)
+        if bound is not None:
+            return self._open_jid(intent, bound['job_id'], project_id=pid, session_id=session_id,
+                                  bound_jid=bound_jid)
+        if len(rows) == 1 and not found['has_more'] and query:
+            return self._open_jid(intent, rows[0]['job_id'], project_id=pid, session_id=session_id,
+                                  bound_jid=bound_jid, switch_session=True)
         if rows:
             return self._choices(intent, 'ambiguous_tasks', projects=[self._row(project)], tasks=rows,
                                  expand=dict(operation='list_jobs', project_id=pid, query=query),
@@ -110,28 +116,49 @@ class Entry:
         replayed = request_file.exists()
         job = self.jobs.create(title=title, goal=intent, scope=scope, acceptance=[],
                                agent='open_work', request_id=request_id)
-        result = self._opened(intent, job['job_id'], session_id=session_id,
-                              created={'project': created_project, 'task': True},
-                              request_id=request_id)
+        result = self._open_jid(intent, job['job_id'], project_id=pid, session_id=session_id,
+                                created={'project': created_project, 'task': True},
+                                request_id=request_id, switch_session=True)
         result['replayed'] = replayed
         return result
 
-    def _opened(self, intent, jid, *, session_id=None, bound_jid=None, created=None, request_id=None):
-        work = self.resume(jid, 'brief')
+    def _open_jid(self, intent, jid, *, project=None, project_id=None, session_id=None,
+                  bound_jid=None, created=None, request_id=None, switch_session=False):
+        job = self.jobs.get(jid)
+        if project is not None:
+            matches = self.flow.project_matches(project)
+            if len(matches) != 1:
+                return self._choices(intent, 'ambiguous_projects' if matches else 'unknown_project',
+                                     projects=self._project_rows(matches), session_id=session_id,
+                                     bound_jid=bound_jid)
+            project_id = matches[0]['project_id']
+        scope = job['scope']['project_ids']
+        if project_id is not None and project_id not in scope:
+            raise Error('INVALID_SCOPE', 'Task is outside the selected project')
+        if project_id is None and len(scope) > 1:
+            return self._choices(intent, 'choose_project_for_task',
+                                 projects=self._project_rows([self.w.project_for(pid) for pid in scope]),
+                                 session_id=session_id, bound_jid=bound_jid,
+                                 expand=dict(operation='open_work', intent=intent, jid=jid))
+        project_id = project_id or scope[0]
+        # Service owns the lifecycle (recovery, scenarios, publication decisions
+        # and bounded resume payload).  The selected project is explicit so a
+        # multi-project task never leaks the wrong project's work context.
+        work = self.resume(jid, 'brief', project_id=project_id)
         result = {'status': 'opened', 'match': 'unique', 'intent': intent, 'work': work,
-                  'created': created or {'project': False, 'task': False}}
+                  'project_id': project_id, 'created': created or {'project': False, 'task': False}}
         if request_id is not None:
             result['request_id'] = request_id
-        if len(work.get('scope', {}).get('project_ids', [])) > 1:
-            result['pending_updates'] = ['This task spans several projects; choose the destination project through prepare_work_context']
         if session_id is not None:
             if bound_jid == jid:
                 state = 'kept'
             elif bound_jid is None:
                 self.flow.bind(session_id, jid)
                 state = 'bound'
+            elif switch_session:
+                self.flow.bind(session_id, jid)
+                state = 'switched'
             else:
-                # A switch is never silent: the old session binding stays as-is.
                 state = 'elsewhere'
             binding = {'session_id': session_id, 'state': state,
                        'jid': bound_jid if state == 'elsewhere' else jid}
@@ -165,14 +192,6 @@ class Entry:
                 binding['jid'] = bound_jid
             result['session_binding'] = binding
         return result
-
-    def _match_projects(self, name):
-        if name.upper().startswith('PRJ-'):
-            return [p for p in self.w.projects() if p['project_id'].upper() == name.upper()]
-        key = name.casefold()
-        matches = [p for p in self.w.projects()
-                   if key in [x.casefold() for x in [p['project_id'], p['name']] + p.get('aliases', [])]]
-        return sorted(matches, key=lambda p: p['project_id'])
 
     def _suggestions(self, name):
         key = name.casefold()

@@ -127,11 +127,11 @@ class Context:
         j = Jobs(self.w).get(jid) if jid else None
         return self._prepare(project_id, j, intent, detail, targeted=False)
 
-    def prepare_record(self, j, detail='brief'):
+    def prepare_record(self, j, detail='brief', project_id=None):
         """Resume directly from one authoritative job, without a project task rollup."""
         if detail not in ('brief', 'full'):
             raise Error('INVALID_ARGUMENT', 'detail must be brief or full')
-        return self._prepare(None, j, '', detail, targeted=True)
+        return self._prepare(project_id, j, '', detail, targeted=True)
 
     def _prepare(self, project_id, j, intent, detail, *, targeted):
         from .git_store import GitStore

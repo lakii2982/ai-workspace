@@ -135,7 +135,7 @@ class Service:
         timeline=Timeline(w)
         feedback=Feedback(w)
 
-        def resume(jid,detail='brief'):
+        def resume(jid,detail='brief',project_id=None):
             jobs.file(jid)  # Validate identity before using it as a lock key.
             with w.lock('service-job:'+jid):
                 job=jobs.get(jid)
@@ -144,7 +144,7 @@ class Service:
                 if recovery['recoverable'] or recovery['pending']:
                     result['recovery']={**recovery,
                         'next_action':dict(operation='recover_artifacts',jid=jid)}
-                result['work_context']=context.prepare_record(job,detail=detail)
+                result['work_context']=context.prepare_record(job,detail=detail,project_id=project_id)
                 result['scenarios'] = desktop.bindings(jid)
                 result['publication_decisions'] = {
                     pid: desktop.list_decisions(pid, jid=jid, limit=10)
