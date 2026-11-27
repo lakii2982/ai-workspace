@@ -1,6 +1,7 @@
 import os
 from typing import Literal
 from typing_extensions import NotRequired, TypedDict
+from pydantic import ConfigDict
 from mcp.server.fastmcp import FastMCP, Context
 from mcp.types import ToolAnnotations
 
@@ -15,6 +16,31 @@ server=FastMCP('AI WorkSpace', instructions=(
     'ask the user once whether to report it; only after they agree call report_issue '
     'with confirm=true.'
 ))
+
+class WorkingFile(TypedDict):
+    """Project-relative path, or the workspace-relative path returned by a write; role may be 主稿."""
+    __pydantic_config__ = ConfigDict(extra='allow')
+    path: str
+    role: NotRequired[str]
+
+class ReviewedFile(TypedDict):
+    __pydantic_config__ = ConfigDict(extra='allow')
+    path: str
+    observation_commit: str
+
+class ContextPatch(TypedDict, total=False):
+    """The only continuation fields accepted by save_work_checkpoint."""
+    # Preserve unknown values for core validation: FastMCP must not silently
+    # drop them before Jobs.validate_context can name the allowed alternatives.
+    __pydantic_config__ = ConfigDict(extra='allow')
+    working_on: str
+    resume_note: str
+    working_files: list[WorkingFile]
+    memory_refs: list[str]
+    reviewed_files: list[ReviewedFile]
+    base_commit: str | None
+    checkpoint_commit: str
+    checkpoint_ref: str
 READ_OPERATIONS = {
     'list_projects', 'get_project', 'get_project_overview', 'list_jobs', 'list_jobs_full',
     'resolve_job', 'list_project_memory', 'read_project_memory', 'read_scenario',
@@ -273,8 +299,8 @@ def mark_context_read(jid:str,observation_commit:str,paths:list[str],lease_token
     return invoke('mark_context_read',dict(jid=jid,observation_commit=observation_commit,paths=paths,lease_token=lease_token))
 
 @server.tool()
-def save_work_checkpoint(jid:str,revision:int,context_patch:dict|None=None,patch:dict|None=None,lease_token:str|None=None)->dict:
-    """After saving files and significant memory, snapshot project and record exact continuation position."""
+def save_work_checkpoint(jid:str,revision:int,context_patch:ContextPatch|None=None,patch:dict|None=None,lease_token:str|None=None)->dict:
+    """After saving files, pass the write/commit response's job_revision. For one draft, omit context_patch or use working_files=[{'path':'工作/.../工作稿/报价.md','role':'主稿'}] (or the returned workspace path); core derives hashes. Unknown keys are rejected with allowed alternatives."""
     return invoke('save_work_checkpoint',dict(jid=jid,revision=revision,context_patch=context_patch,patch=patch,lease_token=lease_token))
 
 

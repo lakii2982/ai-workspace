@@ -12,7 +12,7 @@ Agent 开始工作先定位并恢复已有任务。resume_job/resume_session 直
 
 阅读后调用 mark_context_read(jid,observation_commit,paths,lease_token)，只确认实际读过的文件。文件再变化会重新进入队列。主稿位置从 context.working_files 取得，不凭最后修改时间猜测。
 
-阶段结束先保存文件和有意义的记忆，再调用 save_work_checkpoint(jid,revision,context_patch,patch,lease_token)。context_patch 可设 working_on、resume_note、working_files、memory_refs；patch 沿用任务进展、问题和下一步。快照写入独立 Git refs，不移动分支或改真实暂存区，不表示文件由 Agent 创作或业务成果已批准。
+阶段结束先保存文件和有意义的记忆，再调用 save_work_checkpoint(jid,revision,context_patch,patch,lease_token)。使用刚刚 `write_work_file` 或 `commit_draft` 回包的 `job_revision`，不要沿用保存前的 revision。单稿通常省略 context_patch；需要标明时仅传 `working_files:[{'path':'工作/.../工作稿/报价.md','role':'主稿'}]`，path 可为项目相对路径，或直接使用写入回包的工作区相对 path；无需传 hash 或 source。context_patch 可设 working_on、resume_note、working_files、memory_refs、reviewed_files、base_commit、checkpoint_commit、checkpoint_ref；未知键会明确报错。patch 沿用任务进展、问题和下一步。快照写入独立 Git refs，不移动分支或改真实暂存区，不表示文件由 Agent 创作或业务成果已批准。
 
 项目记忆通过 append_timeline 的可选 memory 字段记录 category/state/reason/supersedes；list_project_memory 和 read_project_memory 用于查询当前决定及理由。手改时间线不一致内容提示待整理，不继续当作核实后的约束。历史字节可经 read_project_file(...,path='记忆/TIMELINE.md',commit=...) 回看。
 

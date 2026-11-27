@@ -12,8 +12,12 @@ class Jobs:
     def validate_context(context):
         allowed={'working_on','resume_note','working_files','memory_refs','reviewed_files',
                  'base_commit','checkpoint_commit','checkpoint_ref'}
-        if not isinstance(context,dict) or not set(context)<=allowed:
-            raise Error('INVALID_ARGUMENT','Invalid context fields')
+        if not isinstance(context,dict):
+            raise Error('INVALID_ARGUMENT','Context patch must be an object')
+        unknown=set(context)-allowed
+        if unknown:
+            raise Error('INVALID_ARGUMENT','Unknown context field(s): '+', '.join(sorted(unknown))+
+                        '. Allowed: '+', '.join(sorted(allowed)))
         for key in ('working_on','resume_note','checkpoint_commit','checkpoint_ref'):
             if key in context and not isinstance(context[key],str):
                 raise Error('INVALID_ARGUMENT','Context text must be a string')
@@ -289,7 +293,7 @@ class Artifacts:
                     if original not in latest['artifacts']:
                         latest['artifacts']=[a for a in latest['artifacts'] if a['path']!=relative]+[original]
                         latest['revision']+=1;latest['updated_at']=now();self.jobs.persist(latest)
-                return {**original,'replayed':True}
+                return {**original,'replayed':True,'job_revision':latest['revision']}
             if receive and actual is not None and not confirm:
                 raise Error('CONFIRMATION_REQUIRED','Confirm replacement of the previous source version')
             if actual!=expected_hash:
@@ -323,7 +327,8 @@ class Artifacts:
                                      if Path(a['path']).as_posix()!=relative]+[artifact]
                 latest['revision']+=1;latest['updated_at']=now();self.jobs.persist(latest)
             recovery_record.unlink(missing_ok=True)
-            return {**artifact,'replayed':False} if receive else artifact
+            result={**artifact,'job_revision':latest['revision']}
+            return {**result,'replayed':False} if receive else result
 
     def _classify_recovery(self, job, event):
         """Classify an intent without changing bytes or job state."""

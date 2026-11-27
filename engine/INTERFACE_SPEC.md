@@ -11,7 +11,7 @@
 - list_project_memory(project_id,query='',categories=None,view='current',limit=20,offset=0)、read_project_memory(project_id,event_id,include_history=true)：区分当前、tentative、legacy、pending_review；历史由Git及事件关系保留。
 - append_timeline增加memory={category,state,reason,supersedes}；category支持decision/constraint/conclusion/experience/hypothesis/question，state支持established/tentative/resolved/withdrawn。未知正文改动不静默当现行结论。
 - mark_context_read(jid,observation_commit,paths,lease_token?)：按文件及实际观察版本记录阅读确认，推进任务revision。
-- save_work_checkpoint(jid,revision,context_patch?,patch?,lease_token?)：创建快照后更新任务；在此之前业务文件与记忆已保存。context包含working_on/resume_note/working_files/memory_refs/reviewed_files/base_commit/checkpoint_commit/checkpoint_ref，可缺省。
+- save_work_checkpoint(jid,revision,context_patch?,patch?,lease_token?)：创建快照后更新任务；在此之前业务文件与记忆已保存。文件保存/提交回包的 `job_revision` 是下一步应传的 revision。context_patch 只允许 working_on/resume_note/working_files/memory_refs/reviewed_files/base_commit/checkpoint_commit/checkpoint_ref；未知字段拒绝并列出可用字段。单稿无需重复传 `primary_draft`/`draft_sha256`/`source`：可省略 context_patch，或传 `working_files:[{path:'工作/.../工作稿/报价.md',role:'主稿'}]`；path 可为项目相对路径，也可直接复用写入回包的工作区相对 path，核心从已保存清单推断版本。
 - Git快照保存refs/aiws/observations及checkpoints；不改HEAD/分支/真实index。文件变更以Git blob为版本；旧manifest和受控发布校验不因此删除。
 
 ## open_work 会话入口
@@ -80,7 +80,7 @@ DELIVERABLE_REQUIRED：任务转completed时，若 工作/JOB/工作稿/ 仍有�
 - resolve_job(project?,query='',jid?)：唯一时返回task；多匹配返回候选，不自动选择。
 - bind_session(session_id,jid)、resume_session(session_id)：绑定稳定任务身份，恢复读取远端最新状态。
 - get_project(project_id)：返回state_hash；update_project(project_id,expected_hash,patch)：可改name/aliases/status/status_note/goal/owner，路径和ID不变。
-- write_work_file(jid,project_id,name,content,kind='draft',expected_hash?,lease_token?)，kind为draft/process。
+- write_work_file(jid,project_id,name,content,kind='draft',expected_hash?,lease_token?)，kind为draft/process。成功回包附 `job_revision`（不写入 artifact 清单），直接用于下一步 checkpoint 的 revision CAS；`commit_draft` 同样返回它。
 - publish_file(jid,project_id,source,source_hash,name,expected_hash?,confirm=false,lease_token?)：具体源版本确认后发布，旧目标进入历史版本。任务已关闭（completed/cancelled）时无需租约即可发布，用于存量成果物迁移；confirm=true 仍必须由用户对具体版本给出。
 - record_sent(jid,project_id,name,source_hash,channel='',evidence_path?,evidence_hash?,lease_token?)：只记录用户已经发送的已发布成果版本，不会发送、登录或查询外部渠道。无凭据时保留为 `user_statement`；可将已放入项目资料且 hash 匹配的渠道回执作为 `channel_receipt`。传入渠道名本身不构成外部核实。list_sent 按记录时间倒序，按文件名和精确 hash 查询，并返回当前或归档的精确版本；read_sent_version 读取该版本。
 - move_work_file(jid,project_id,source,target_kind,name?,expected_hash,lease_token?)：在工作稿与过程材料之间移动，字节不变。expected_hash 必填；目标已存在、源已变化、存在未提交的 checkout 或待决发布时拒绝。

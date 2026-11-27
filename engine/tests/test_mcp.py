@@ -79,6 +79,51 @@ def test_real_stdio(tmp_path):
     asyncio.run(run())
 
 
+def test_stdio_checkpoint_schema_and_write_revision(tmp_path):
+    w=Workspace(tmp_path);w.init();project=w.project_create('检查点')
+    async def run():
+        params=StdioServerParameters(command=sys.executable,args=['-m','aiws.mcp_server_entry'],
+                                     env={**os.environ,'AIWS_WORKSPACE':str(tmp_path)})
+        async with stdio_client(params) as (read,write):
+            async with ClientSession(read,write) as session:
+                await session.initialize()
+                tools=await session.list_tools()
+                checkpoint_tool=next(tool for tool in tools.tools if tool.name=='save_work_checkpoint')
+                definitions=checkpoint_tool.inputSchema['$defs']
+                context_schema=definitions['ContextPatch']
+                assert {'working_on','working_files','resume_note'} <= set(context_schema['properties'])
+                assert context_schema['additionalProperties'] is True
+                file_schema=definitions['WorkingFile']
+                assert {'path','role'} <= set(file_schema['properties'])
+                scope={'include_company':False,'include_professional':False,
+                       'project_ids':[project['project_id']],'topic_ids':[]}
+                job=payload(await session.call_tool('create_job',{'title':'续写','goal':'保存主稿','scope':scope}))['result']
+                saved=payload(await session.call_tool('write_work_file',{
+                    'jid':job['job_id'],'project_id':project['project_id'],'name':'报价.md','content':'第一版'}))['result']
+                assert saved['job_revision']==job['revision']+1
+                checkpoint=payload(await session.call_tool('save_work_checkpoint',{
+                    'jid':job['job_id'],'revision':saved['job_revision'],
+                    'context_patch':{'base_commit':None,
+                                      'working_files':[{'path':saved['path'],'role':'主稿','legacy_hint':'保留'}]}}))
+                assert checkpoint['ok'] and checkpoint['result']['context']['working_files'][0]['role']=='主稿'
+                assert checkpoint['result']['context']['working_files'][0]['legacy_hint']=='保留'
+                resumed=payload(await session.call_tool('resume_job',{'jid':job['job_id']}))['result']
+                assert resumed['revision']==checkpoint['result']['revision']
+                appended=payload(await session.call_tool('checkpoint_job',{
+                    'jid':job['job_id'],'revision':resumed['revision'],
+                    'patch':{'next_steps':['继续核对']}}))
+                assert appended['ok']
+                stale=payload(await session.call_tool('save_work_checkpoint',{
+                    'jid':job['job_id'],'revision':saved['job_revision']}))
+                assert stale['ok'] is False and stale['error']['code']=='CONFLICT'
+                unknown=payload(await session.call_tool('save_work_checkpoint',{
+                    'jid':job['job_id'],'revision':appended['result']['revision'],
+                    'context_patch':{'primary_draft':'报价.md'}}))
+                assert unknown['ok'] is False and unknown['error']['code']=='INVALID_ARGUMENT'
+                assert 'working_files' in unknown['error']['message']
+    asyncio.run(run())
+
+
 def test_open_work_stdio(tmp_path):
     w=Workspace(tmp_path);w.init();p=w.project_create('入口')
     (w.path(p['path']+'/资料/报价.md')).write_text('报价资料')
