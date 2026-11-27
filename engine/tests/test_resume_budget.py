@@ -78,8 +78,8 @@ def test_extreme_brief_keeps_blockers_draft_and_publication_identity(tmp_path):
         'name':'主稿.md','target_name':'成果.md','reason':huge})
     result=service.call('resume_job',{'jid':j['job_id']})
     assert len(json.dumps({'ok':True,'result':result},ensure_ascii=False).encode()) <= 16*1024
-    assert result['work_context']['primary_draft']['path'].endswith('主稿.md')
-    assert result['work_context']['attention']['unresolved_issue_total']==20
+    assert result['task']['open_issue_total']==20
     item=result['publication_decisions'][p['project_id']]['items'][0]
     assert item['decision_id']==decision['decision_id'] and item['state']=='pending'
+    assert item['source_hash']==decision['source_hash'] and len(item['source_hash'])==64
     assert result['brief_budget']['expand']['detail']=='full'

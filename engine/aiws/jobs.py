@@ -378,7 +378,7 @@ class Artifacts:
         with self.w.lock('job:'+jid):
             job=self.jobs.get(jid)
             check_lease(job,lease_token,require=enabled(self.w))
-            recovered=[];pending=[]
+            recovered=[];pending=[];recovered_intents=[]
             recovery_folder=self.w.path(f'.workspace/recovery/{jid}')
             # New saves have a job-local journal so resume is bounded.  The
             # historical fallback is only used by an explicit repair command.
@@ -390,19 +390,17 @@ class Artifacts:
                     continue
                 artifact,state=self._classify_recovery(job,event)
                 if state in ('completed','not_written'):
-                    if recovery_folder.is_dir() and event_path.is_relative_to(recovery_folder):event_path.unlink(missing_ok=True)
                     continue
                 if state!='recoverable':
                     pending.append({'path':artifact.get('path') if artifact else event.get('path'),'state':state})
                     continue
                 job['artifacts']=[a for a in job['artifacts'] if a['path']!=artifact['path']]+[artifact]
                 recovered.append(artifact)
+                if recovery_folder.is_dir() and event_path.is_relative_to(recovery_folder):
+                    recovered_intents.append(event_path)
             if recovered:
                 job['revision']+=1;job['updated_at']=now()
                 self.jobs.persist(job)
-                for event_path in event_paths:
-                    if recovery_folder.is_dir() and event_path.is_relative_to(recovery_folder):
-                        artifact,state=self._classify_recovery(job,load(event_path))
-                        if state=='completed':event_path.unlink(missing_ok=True)
+                for event_path in recovered_intents:event_path.unlink(missing_ok=True)
             return {'job_id':jid,'recovered':recovered,'pending':pending,
                     'revision':job['revision']}

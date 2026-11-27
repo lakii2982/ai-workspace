@@ -86,3 +86,18 @@ def test_prepared_intent_after_disk_write_is_recoverable_but_manual_bytes_are_no
     target.write_bytes(b'human')
     status=Service(tmp_path).call('resume_job',{'jid':j['job_id']})['recovery']
     assert status['recoverable']==[] and status['pending']==[{'path':relative,'state':'changed_or_missing'}]
+
+
+def test_recovery_of_multiple_intents_removes_only_repaired_records(tmp_path, monkeypatch):
+    w,p,j=workspace(tmp_path);actual=Jobs.persist;calls=[]
+    def fail(self, record):
+        calls.append(record['revision'])
+        raise Error('REMOTE_UNCERTAIN','lost')
+    monkeypatch.setattr(Jobs,'persist',fail)
+    paths=[p['path']+'/工作/'+j['directory_name']+'/工作稿/'+name for name in ('a.md','b.md')]
+    for path in paths:
+        with pytest.raises(Error):Artifacts(w).save(j['job_id'],path,path.encode())
+    monkeypatch.setattr(Jobs,'persist',actual)
+    repaired=Service(tmp_path).call('recover_artifacts',{'jid':j['job_id']})
+    assert {item['path'] for item in repaired['recovered']}==set(paths)
+    assert not list(w.path('.workspace/recovery/'+j['job_id']).glob('*.json'))

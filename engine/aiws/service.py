@@ -33,42 +33,47 @@ def bound_brief_payload(payload):
     """Keep the normal brief response unchanged unless it exceeds MCP budget."""
     encoded=lambda value: json.dumps(value,ensure_ascii=False,separators=(',',':')).encode()
     if len(encoded(payload)) <= BRIEF_BYTES:return payload
-    result=json.loads(json.dumps(payload,ensure_ascii=False))
-    def short(value,limit=240):
+    def text(value, limit=240):
         return value if not isinstance(value,str) or len(value)<=limit else value[:limit]+'…'
-    def compact(value, limit=240):
-        if isinstance(value,str):return short(value,limit)
-        if isinstance(value,list):return [compact(item,limit) for item in value[:8]]
-        if isinstance(value,dict):return {key:compact(item,limit) for key,item in value.items()}
-        return value
-    for key in ('title','goal'):
-        result[key]=short(result.get(key),400)
-    work=result.get('work_context',{})
+    jid=payload['job_id']
+    expand={'operation':'resume_job','jid':jid,'detail':'full'}
+    work=payload.get('work_context',{})
     task=work.get('task_context') or {}
-    for key in ('title','goal'):
-        task[key]=short(task.get(key),400)
-    context=task.get('context')
-    if isinstance(context,dict):
-        task['context']={key:context[key] for key in ('working_on','resume_note','working_files') if key in context}
-        task['context_omitted']=True
-    decisions=result.get('publication_decisions',{})
-    for page in decisions.values():
-        if not isinstance(page,dict):continue
-        items=page.get('items',[])
-        page['items']=[{key:short(item.get(key),160) for key in
-                        ('decision_id','state','name','source_hash','created_at','reason') if key in item}
-                       for item in items[:8]]
-        page['omitted']=max(0,len(items)-len(page['items']))
-    # Memory evidence and publication history are expandable.  Keep a stable
-    # indicator rather than silently dropping them when an extreme job remains.
-    work['memory_references']=[{'event_id':item.get('event_id'),'state':item.get('state')}
-                               for item in work.get('memory_references',[])[:4]]
-    result=compact(result)
-    if len(encoded(result)) > BRIEF_BYTES:
-        result=compact(result,48)
-    result['brief_budget']={'bytes':len(encoded(result)),'limit':BRIEF_BYTES,
-                            'expand':{'operation':'resume_job','jid':result.get('job_id'),'detail':'full'}}
-    return result
+    progress=work.get('progress',{})
+    primary=work.get('primary_draft')
+    if isinstance(primary,dict) and isinstance(primary.get('path'),str) and len(primary['path'])>500:
+        primary={key:value for key,value in primary.items() if key!='path'}
+        primary['expand']=expand
+    publications={}
+    for project_id,page in payload.get('publication_decisions',{}).items():
+        items=page.get('items',[]) if isinstance(page,dict) else []
+        # Identity and reviewed hash are operational fields. Do not truncate them.
+        pending=next((item for item in items if item.get('state')=='pending'), items[0] if items else None)
+        publications[project_id]={'total':page.get('total',len(items)) if isinstance(page,dict) else len(items),
+                                  'pending_total':sum(item.get('state')=='pending' for item in items),
+                                  'items':([{key:pending[key] for key in ('decision_id','state','source_hash','name') if key in pending}]
+                                           if pending else []), 'expand':{'operation':'list_decisions','project_id':project_id,'jid':jid}}
+    compact={'job_id':jid,'title':text(payload.get('title')),'goal':text(payload.get('goal')),
+             'status':payload.get('status'),'revision':payload.get('revision'),
+             'directories':payload.get('directories',[])[:2],
+             'task':{'working_on':text((task.get('context') or {}).get('working_on','')),
+                     'resume_note':text((task.get('context') or {}).get('resume_note','')),
+                     'next_steps':[text(value) for value in progress.get('next_steps',[])[:3]],
+                     'open_issues':[text(value) for value in progress.get('open_issues',[])[:3]],
+                     'open_issue_total':work.get('attention',{}).get('unresolved_issue_total',len(task.get('open_issues',[])))},
+             'primary_draft':primary,'publication_decisions':publications,
+             'recovery':payload.get('recovery'),'expand':expand}
+    if len(encoded(compact)) > BRIEF_BYTES:
+        # Last resort remains executable. Paths and prose are expandable while
+        # stable task, decision and content-hash identities remain intact.
+        first_project=next(iter(publications),None)
+        compact={'job_id':jid,'status':payload.get('status'),'revision':payload.get('revision'),
+                 'open_issue_total':compact['task']['open_issue_total'],
+                 'pending_review_total':work.get('attention',{}).get('pending_review_total',0),
+                 'publication_decision':publications.get(first_project) if first_project else None,
+                 'expand':expand}
+    compact['brief_budget']={'bytes':len(encoded(compact)),'limit':BRIEF_BYTES,'expand':expand}
+    return compact
 
 class Service:
     def __init__(self,root):self.w=Workspace(root)
