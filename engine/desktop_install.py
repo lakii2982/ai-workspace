@@ -124,7 +124,7 @@ def configure(client, workspace, launcher, *, activate=False, source=None):
     if client == 'codex':
         # The plugin supplies instructions; there is only one MCP registration.
         plugin = workspace / 'plugins' / 'aiws'
-        save(plugin / '.codex-plugin/plugin.json', encoded(dict(name='aiws', version='0.1.2',
+        save(plugin / '.codex-plugin/plugin.json', encoded(dict(name='aiws', version='0.1.3',
              description='在本地工作空间接续任务、管理资料和成果', skills='./skills/')))
         save(plugin / 'skills/aiws/SKILL.md', skill.encode())
         catalog = workspace / '.agents/plugins/marketplace.json'
