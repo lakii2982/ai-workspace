@@ -253,12 +253,14 @@ class Retrieval:
             else:
                 rows=db.execute('SELECT * FROM sources WHERE '+clause+' AND (instr(lower(snippet),lower(?))>0 OR instr(lower(title),lower(?))>0) LIMIT ?',args+[query,query,min(max(int(limit),1),100)]).fetchall()
         return {'matches':[dict(r) for r in rows],'index':report}
-    def read(self,source_id,scope):
+    def read(self,source_id,scope,expected_hash=None):
         clause,args=self.clause(scope)
         with self.connect() as db:
             row=db.execute('SELECT * FROM sources WHERE source_id=? AND '+clause,[source_id]+args).fetchone()
         if row is None: raise Error('NOT_FOUND','Source not found in authorized scope')
         value=dict(row)
+        if expected_hash is not None and value['sha256']!=expected_hash:
+            raise Error('STALE_INDEX','The cited version was replaced; search for current evidence')
         self.w.allowed(value['source_path'],scope)
         path=self.w.path(value['source_path'])
         if value['sha256'].startswith('git:'):

@@ -17,12 +17,13 @@ def receive(svc,job,pid,**kw):
 def test_receive_search_read_and_stale_check(tmp_path):
     svc,a,b,job,scope=make(tmp_path)
     result=receive(svc,job,a['project_id'],name='报价.txt',content='聊天附件 采购周期45天',confirm=True,source_ref='feishu-file:boxcnABC')
-    assert result['replayed'] is False and result['purpose']=='source' and result['status']=='approved'
+    assert result['replayed'] is False and result['purpose']=='source' and result['status']=='original'
     path=Path(result['path'])
     assert path.parts[-2:]==('资料','报价.txt') and path.parts[-3]==Path(a['path']).name
     assert svc.w.path(result['path']).read_text()=='聊天附件 采购周期45天'
     matches=svc.call('search_sources',{'query':'采购周期45天','scope':scope([a['project_id']])})['matches']
     assert [m['source_path'] for m in matches]==[result['path']]
+    assert matches[0]['source_status']=='original'
     read=svc.call('read_source',{'source_id':matches[0]['source_id'],'scope':scope([a['project_id']])})
     assert '采购周期45天' in read['snippet'] and read['sha256']==result['hash']
     events=list(svc.w.path('.workspace/history/events').glob('*.json'))
@@ -65,10 +66,17 @@ def test_different_content_never_silently_overwrites(tmp_path):
     assert saved['replayed'] is False and svc.w.path(first['path']).read_text()=='第二版'
     assert svc.w.path(f".workspace/history/files/{first['hash']}").read_text()=='第一版'
 
-def test_confirmation_required_for_new_source(tmp_path):
+def test_new_source_can_be_filed_and_old_citation_detects_reindex(tmp_path):
     svc,a,b,job,scope=make(tmp_path)
-    with pytest.raises(Error) as e:receive(svc,job,a['project_id'],name='新.txt',content='正文')
-    assert e.value.code=='CONFIRMATION_REQUIRED'
+    result=receive(svc,job,a['project_id'],name='新.txt',content='正文')
+    project_scope=scope([a['project_id']])
+    cite=svc.call('search_sources',{'query':'正文','scope':project_scope})['matches'][0]
+    receive(svc,job,a['project_id'],name='新.txt',content='新版正文',expected_hash=result['hash'],confirm=True)
+    now=svc.call('search_sources',{'query':'新版正文','scope':project_scope})['matches'][0]
+    assert now['source_status']=='original'
+    with pytest.raises(Error) as e:
+        svc.call('read_source',{'source_id':cite['source_id'],'scope':project_scope,'expected_hash':cite['sha256']})
+    assert e.value.code=='STALE_INDEX'
 
 def test_scope_isolation(tmp_path):
     svc,a,b,job,scope=make(tmp_path)

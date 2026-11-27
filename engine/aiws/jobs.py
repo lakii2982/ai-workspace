@@ -242,9 +242,8 @@ class Jobs:
 
 class Artifacts:
     def __init__(self,w):self.w=w;self.jobs=Jobs(w)
-    def save(self,jid,relative,content,expected_hash=None,confirm=False,purpose='draft',lease_token=None,allow_closed=False,detail=None):
+    def save(self,jid,relative,content,expected_hash=None,confirm=False,purpose='draft',lease_token=None,allow_closed=False,receive=False,source_ref=None):
         j=self.jobs.get(jid)
-        if detail is not None and not isinstance(detail,dict):raise Error('INVALID_ARGUMENT','Event detail must be an object')
         from .workflow import check_lease
         from .remote_store import enabled
         # 已关闭任务无人持有、也不会被并发编辑：仅允许有确认留痕的"事后补发布"（存量迁移）跳过租约。
@@ -258,18 +257,31 @@ class Artifacts:
             if not sub or sub[0] not in ('资料','工作','成果'):raise Error('INVALID_SCOPE','Project metadata is tool-managed')
             if sub[0]=='工作' and (len(sub)<3 or sub[1] not in (jid,j.get('directory_name',jid))):raise Error('INVALID_SCOPE','Draft must belong to this job')
         formal=kind!='project' or '工作' not in parts
-        if formal and not confirm:raise Error('CONFIRMATION_REQUIRED','Explicit confirmation required to publish formal knowledge')
+        if receive and (kind!='project' or sub[0]!='资料' or purpose!='source'):
+            raise Error('INVALID_SCOPE','Attachments belong in the selected project sources')
+        if formal and not receive and not confirm:raise Error('CONFIRMATION_REQUIRED','Explicit confirmation required to publish formal knowledge')
         relative=self.w.path(relative).relative_to(self.w.root).as_posix()
         if not isinstance(content,bytes):raise Error('INVALID_ARGUMENT','Artifact content must be bytes')
         with self.w.lock('file:'+relative):
             target=self.w.path(relative)
             actual=digest(target) if target.exists() else None
+            incoming=hashlib.sha256(content).hexdigest()
+            if receive and actual==incoming:
+                original={'path':relative,'hash':incoming,'purpose':'source','status':'original'}
+                with self.w.lock('job:'+jid):
+                    latest=self.jobs.get(jid)
+                    if original not in latest['artifacts']:
+                        latest['artifacts']=[a for a in latest['artifacts'] if a['path']!=relative]+[original]
+                        latest['revision']+=1;latest['updated_at']=now();self.jobs.persist(latest)
+                return {**original,'replayed':True}
+            if receive and actual is not None and not confirm:
+                raise Error('CONFIRMATION_REQUIRED','Confirm replacement of the previous source version')
             if actual!=expected_hash:
                 conflict=self.w.path(f'.workspace/history/conflicts/{jid}/{hashlib.sha256(content).hexdigest()}')
                 atomic(conflict,content)
                 raise Error('CONFLICT','File changed; incoming revision preserved in history/conflicts')
-            event={'schema_version':1,'job_id':jid,'path':relative,'old_hash':actual,'new_hash':hashlib.sha256(content).hexdigest(),'confirmed':confirm,'actor':'local-user' if confirm else j['last_agent'],'time':now()}
-            if detail:event={**event,**detail}
+            event={'schema_version':1,'job_id':jid,'path':relative,'old_hash':actual,'new_hash':incoming,'confirmed':confirm and not receive,'actor':'local-user' if confirm else j['last_agent'],'time':now()}
+            if receive and source_ref is not None:event['source_ref']=source_ref
             event_id=hashlib.sha256((relative+now()).encode()).hexdigest()
             if target.exists():
                 atomic(self.w.path(f'.workspace/history/files/{actual}'),target.read_bytes())
@@ -279,10 +291,10 @@ class Artifacts:
             put_json(self.w.path(f'.workspace/history/events/{event_id}.json'),{**event,'phase':'prepared'})
             atomic(target,content)
             put_json(self.w.path(f'.workspace/history/events/{event_id}.json'),{**event,'phase':'committed'})
-            artifact={'path':relative,'hash':digest(target),'purpose':purpose,'status':'approved' if formal else 'draft'}
+            artifact={'path':relative,'hash':digest(target),'purpose':purpose,'status':'original' if receive else 'approved' if formal else 'draft'}
             with self.w.lock('job:'+jid):
                 latest=self.jobs.get(jid)
                 latest['artifacts']=[a for a in latest['artifacts']
                                      if Path(a['path']).as_posix()!=relative]+[artifact]
                 latest['revision']+=1;latest['updated_at']=now();self.jobs.persist(latest)
-            return artifact
+            return {**artifact,'replayed':False} if receive else artifact

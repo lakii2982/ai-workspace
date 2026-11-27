@@ -35,9 +35,9 @@
 - resume_job: jid(str)
 - checkpoint_job: jid(str), revision(int), patch(object), reopen(bool,默认false)
 - search_sources: query(str), scope(object), limit(int,默认20), strict(bool,默认false)。常规搜索枚举当前范围，未变化的本地文件用设备、文件标识、大小与修改/状态时间复用已有索引。strict=true 或显式 index update 重新校验文件内容。read_source 引用前始终回读原件并核对指纹。旧索引在首次访问时自动补齐派生缓存。
-- read_source: source_id(str), scope(object)
+- read_source: source_id(str), scope(object), expected_hash(str,可选)。复核已保存的引用时传入当时的 sha256，原件换版后返回 STALE_INDEX。
 - save_artifact: jid(str), relative(str), content(str)或content_base64(str), expected_hash(str|null,默认null表示必须不存在), confirm(bool,默认false), purpose(str,默认draft)
-- receive_source: jid(str), project_id(str), name(str,单个文件名), content(str)或content_base64(str), expected_hash(str|null,默认null表示必须不存在), confirm(bool,默认false), lease_token(str,可选), source_ref(str,可选)。聊天附件原件收件：宿主把实际读到的字节按文件名存入项目 资料/，字节只能来自宿主真实读取（文本或base64），不提供任意主机路径读取；宿主未能读取原始附件链接时必须如实告知用户，不得凭空生成内容。同内容重试幂等返回 replayed=true，不写事件、不推进任务revision；不同内容遵循既有确认语义：资料属正式知识需 confirm=true，且 expected_hash 必须等于当前文件指纹（新文件为null），否则 CONFIRMATION_REQUIRED/CONFLICT，不静默覆盖。source_ref 记录原始附件出处（如聊天文件标识）写入历史事件。收件后按既有检索链路 search_sources/read_source 回读；原件变化按 STALE_INDEX 回查；范围隔离与 search_sources 相同。
+- receive_source: jid(str), project_id(str), name(str,单个文件名), content(str)或content_base64(str), expected_hash(str|null,默认null表示必须不存在), confirm(bool,默认false), lease_token(str,可选), source_ref(str,可选)。聊天附件原件收件：宿主把实际读到的字节按文件名存入项目 资料/，字节只能来自宿主真实读取（文本或base64），不提供任意主机路径读取；宿主未能读取原始附件链接时必须如实告知用户，不得凭空生成内容。新收原件标记为 original。同一工作同内容重试复用首次登记。替换旧文件需 confirm=true 及旧指纹，历史原文保留。source_ref 记录原始附件出处（如聊天文件标识）写入历史事件。收件后按既有检索链路 search_sources/read_source 回读；原件变化按 STALE_INDEX 回查；范围隔离与 search_sources 相同。
 - restore: archive(str), destination(str,必须为不存在目录)
 
 scope 必须包含 include_company(bool)、include_professional(bool)、project_ids(list[str])、topic_ids(list[str]，当前仅空)。未明确范围不全库回退。工作草稿默认不索引；正式成果归入项目范围。查询阶段SQL过滤，回读再次校验范围、路径和原件hash。

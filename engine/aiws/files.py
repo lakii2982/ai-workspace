@@ -21,13 +21,9 @@ class Files:
         j=Jobs(self.w).get(jid)
         if project_id not in j['scope']['project_ids']:raise Error('INVALID_SCOPE','Project outside job')
         relative=self.w.project_for(project_id)['path']+'/资料/'+name
-        incoming=hashlib.sha256(content).hexdigest()
-        target=self.w.path(relative)
-        if target.is_file() and digest(target)==incoming:
-            return {'path':relative,'hash':incoming,'purpose':'source','status':'approved','replayed':True}
-        detail={'source_ref':source_ref} if source_ref is not None else None
-        saved=Artifacts(self.w).save(jid,relative,content,expected_hash=expected_hash,confirm=confirm,purpose='source',lease_token=lease_token,detail=detail)
-        return {**saved,'replayed':False}
+        return Artifacts(self.w).save(jid,relative,content,expected_hash=expected_hash,
+                                      confirm=confirm,purpose='source',lease_token=lease_token,
+                                      receive=True,source_ref=source_ref)
     def _directory(self,jid,project_id):
         directory=next((d for d in self.directories(jid) if d['project_id']==project_id),None)
         if not directory:raise Error('INVALID_SCOPE','Project outside job')
