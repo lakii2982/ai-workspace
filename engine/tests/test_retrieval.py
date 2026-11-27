@@ -6,6 +6,28 @@ from openpyxl import Workbook
 from reportlab.pdfgen.canvas import Canvas
 import pytest
 
+def test_xlsx_formula_cache_and_sparse_layout(tmp_path):
+    # 多页签、稀疏单元格、空行、有/无缓存值的公式：定位符与文案必须逐项等价。
+    import zipfile
+    from aiws.retrieval import extract
+    book=Workbook();data=book.active;data.title='数据'
+    data['A1']='标题';data['B2']='=1+2';data['D3']='=2+3';data['C10']='尾注'
+    book.create_sheet('汇总')['A1']='=SUM(数据!B2)'
+    path=tmp_path/'缓存.xlsx';book.save(path)
+    with zipfile.ZipFile(path) as src:items={n:src.read(n) for n in src.namelist()}
+    # openpyxl 不计算公式；向 sheet XML 注入 <v> 模拟 Excel 保存的缓存值。
+    items['xl/worksheets/sheet1.xml']=items['xl/worksheets/sheet1.xml'].replace(b'<f>1+2</f><v></v>',b'<f>1+2</f><v>3</v>')
+    items['xl/worksheets/sheet2.xml']=items['xl/worksheets/sheet2.xml'].replace(b'<v></v>',b'<v>6</v>',1)
+    with zipfile.ZipFile(path,'w') as dst:
+        for n,blob in items.items():dst.writestr(n,blob)
+    assert dict(extract(path))=={
+        '数据!A1':'标题',
+        '数据!B2':'=1+2 [cached=3; cache may be stale; not recalculated]',
+        '数据!D3':'=2+3 [cached=None; cache may be stale; not recalculated]',
+        '数据!C10':'尾注',
+        '汇总!A1':'=SUM(数据!B2) [cached=6; cache may be stale; not recalculated]',
+    }
+
 def setup(tmp_path):
     w=Workspace(tmp_path);w.init();a=w.project_create('A');b=w.project_create('B')
     scope={'include_company':False,'include_professional':False,'project_ids':[a['project_id']],'topic_ids':[]}
