@@ -1,3 +1,5 @@
+import json
+
 from aiws.context import Context
 from aiws.core import Workspace, digest
 from aiws.jobs import Jobs
@@ -44,3 +46,20 @@ def test_overview_scans_jobs_once_without_query_pagination(tmp_path, monkeypatch
     view=Context(w).overview(p['project_id'])
     assert view['total_tasks']==1
     assert calls==[True]
+
+
+def test_default_resume_serializes_under_mcp_budget_and_full_expands(tmp_path):
+    w,p,j=setup(tmp_path);timeline=w.path(p['path']+'/记忆/TIMELINE.md');t=Timeline(w)
+    for number in range(100):
+        t.append(p['project_id'],f'long{number}','2026-11-27','2026-11-27','decision',
+                 '约束'+str(number),'生效','范围','用户','继续',['用户'],digest(timeline),
+                 memory=dict(category='constraint',state='established',reason='长记忆'*20,supersedes=[]))
+    j=Jobs(w).checkpoint(j['job_id'],j['revision'],
+        {'next_steps':['下一步'+str(i) for i in range(40)],
+         'open_issues':['待审'+str(i) for i in range(40)]})
+    service=Service(tmp_path)
+    brief=service.call('resume_job',{'jid':j['job_id']})
+    assert len(json.dumps({'ok':True,'result':brief},ensure_ascii=False).encode()) <= 16*1024
+    full=service.call('resume_job',{'jid':j['job_id'],'detail':'full'})
+    assert len(full['work_context']['memory']['items'])==100
+    assert len(full['work_context']['task_context']['next_steps'])==40

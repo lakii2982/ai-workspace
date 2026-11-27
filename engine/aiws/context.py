@@ -48,6 +48,9 @@ class Context:
     @classmethod
     def resume_memory_view(cls, data):
         """Bound the default resume response and make every omission visible."""
+        if not (data.get('total') or data.get('pending_review') or data.get('events_total') or data.get('legacy')):
+            return {'items':[], 'resume_budget':{'totals':{},'omitted':{},
+                    'expand':{'operation':'prepare_work_context','detail':'full'}}}
         result=cls.memory_view(data, 'brief')
         totals={'items':data.get('total', len(result.get('items', []))),
                 'pending_review':len(result.get('pending_review', [])),
@@ -132,6 +135,13 @@ class Context:
                                 context=ctx, completed=j['completed'][-3:] if detail=='brief' else j['completed'],
                                 next_steps=j['next_steps'], open_issues=j['open_issues'],
                                 local_decisions=j['decisions'], artifacts=j['artifacts'])
+            if detail=='brief':
+                omitted={}
+                for key in ('next_steps','open_issues','local_decisions','artifacts'):
+                    values=task_context[key]
+                    if len(values)>8:omitted[key]=len(values)-8
+                    task_context[key]=values[:8]
+                if omitted:task_context['omitted']=omitted
             ids = j['scope']['project_ids']
             if project_id and project_id not in ids:
                 raise Error('INVALID_SCOPE', 'Project outside task')
@@ -260,12 +270,15 @@ class Context:
                       next_steps=task_context['next_steps'] if task_context else [],
                       open_issues=task_context['open_issues'] if task_context else [])
         attention=dict(pending_review_total=len(memory.get('pending_review',[])),
-                       unresolved_issue_total=len(progress['open_issues']))
+                       unresolved_issue_total=len(j['open_issues']) if j else 0)
+        lanes={}
+        if any(progress.values()):lanes['progress']=progress
+        if any(attention.values()):lanes['attention']=attention
         return dict(identity=dict(project_id=project_id, jid=jid), project_brief=overview,
                     task_context=task_context, git_status=status, observation=public_observation,
                     primary_draft=draft, changed_reviewed_files=changed_reviewed,
                     index=index_report,
-                    progress=progress, attention=attention,
+                    **lanes,
                     git_changes=changes,
                     memory=(self.resume_memory_view(memory) if targeted and detail=='brief'
                             else self.memory_view(memory,detail)), memory_references=references,
