@@ -46,7 +46,10 @@ def test_git_document_versions_and_unregistered_work_file(tmp_path):
     assert '六十天' in result['after']['text']
     assert '新要求' in result['diff']
     draft=g.root/'工作/手放入.txt';draft.write_text('尚未登记的主稿')
-    assert r.read_project_file(p['project_id'],'工作/手放入.txt')['text']=='尚未登记的主稿'
+    value=r.read_project_file(p['project_id'],'工作/手放入.txt')
+    assert value['text']=='尚未登记的主稿'
+    import hashlib
+    assert value['sha256']==hashlib.sha256('尚未登记的主稿'.encode()).hexdigest()
     assert not r.search('尚未登记',s)['matches']
     unsupported=g.root/'资料/附件.bin';unsupported.write_bytes(b'opaque')
     assert r.read_project_file(p['project_id'],'资料/附件.bin')['readability']=='unsupported'

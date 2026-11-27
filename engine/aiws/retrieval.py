@@ -316,7 +316,8 @@ class Retrieval:
         else:
             if not target.is_file():raise Error('NOT_FOUND','Project file missing')
             content=target.read_bytes()
-        result={'project_id':project_id,'path':relative.as_posix(),'source_path':project['path']+'/'+relative.as_posix(),'commit':version}
+        result={'project_id':project_id,'path':relative.as_posix(),'source_path':project['path']+'/'+relative.as_posix(),'commit':version,
+                'sha256':hashlib.sha256(content).hexdigest()}
         try:
             chunks=self._extract_bytes(content,target.suffix)
             return {**result,'readability':'readable','chunks':[{'locator':loc,'text':text} for loc,text in chunks],'text':'\n'.join(text for _,text in chunks)}

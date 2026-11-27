@@ -1,9 +1,10 @@
 import os
+from typing import Literal
 from mcp.server.fastmcp import FastMCP, Context
 from mcp.types import ToolAnnotations
 
 server=FastMCP('AI WorkSpace', instructions=(
-    'Use the bound project and resume the task. Edit Office files with checkout_draft and '
+    'On the first project request, call open_work before reading or writing business files. Pass the project name or job when the user states it; ask for the project once when unresolved. Continue the original request in this chat. Edit Office files with checkout_draft and '
     'commit_draft. Ask the user about a specific version before resolve_publication. '
     'Generalize a completed task into reusable variables and steps with save_scenario. '
     'Use apply_scenario to pin the revision. Permanent changes require user confirmation. '
@@ -172,7 +173,8 @@ def publish_file(jid:str,project_id:str,source:str,source_hash:str,name:str,expe
     return invoke('publish_file',dict(jid=jid,project_id=project_id,source=source,source_hash=source_hash,name=name,expected_hash=expected_hash,confirm=confirm,lease_token=lease_token))
 
 @server.tool()
-def append_timeline(project_id:str,event_id:str,event_date:str,record_date:str,kind:str,summary:str,status:str,impact:str,owner:str,next_action:str,sources:list[str],expected_hash:str|None=None,memory:dict|None=None)->dict:
+def append_timeline(project_id:str,event_id:str,event_date:str,record_date:str,kind:Literal['fact','plan','recommendation','unconfirmed','decision'],summary:str,status:str,impact:str,owner:str,next_action:str,sources:list[str],expected_hash:str|None=None,memory:dict|None=None)->dict:
+    """Record a significant milestone. Read 记忆/TIMELINE.md via read_project_file first and pass its sha256 as expected_hash."""
     return invoke('append_timeline',dict(project_id=project_id,event_id=event_id,event_date=event_date,record_date=record_date,kind=kind,summary=summary,status=status,impact=impact,owner=owner,next_action=next_action,sources=sources,expected_hash=expected_hash,memory=memory))
 
 @server.tool(annotations=ToolAnnotations(readOnlyHint=True, destructiveHint=False))
