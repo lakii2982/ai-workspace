@@ -2,6 +2,7 @@ import base64
 import fcntl
 import json
 from .core import Workspace, Error
+from .entry import Entry
 from .retrieval import Retrieval
 from .jobs import Jobs, Artifacts
 from .maintenance import Maintenance
@@ -79,8 +80,11 @@ class Service:
         if operation=='backup':return Maintenance(w).backup()
         if operation=='restore':return Maintenance(w).restore(**args)
         gate=w.path('.workspace/gate.lock')
+        # open_work creates a project only when the caller explicitly passes
+        # create_project; that workspace-wide allocation needs the exclusive gate.
+        exclusive=operation in _EXCLUSIVE_OPERATIONS or (operation=='open_work' and isinstance(args,dict) and bool(args.get('create_project')))
         with gate.open('a+') as lock:
-            fcntl.flock(lock,fcntl.LOCK_EX if operation in _EXCLUSIVE_OPERATIONS else fcntl.LOCK_SH)
+            fcntl.flock(lock,fcntl.LOCK_EX if exclusive else fcntl.LOCK_SH)
             try:
                 key=None
                 if operation in _JOB_WRITES and isinstance(args.get('jid'),str):
@@ -165,7 +169,7 @@ class Service:
             return GitStore(w,args['project_id']).initialize()
         if operation=='read_memory_version':
             return retrieval.read_project_file(args['project_id'],'记忆/TIMELINE.md',args['commit'])
-        methods={'get_project':projects.get,'update_project':projects.update,'write_work_file':files.write,'publish_file':files.publish,'move_work_file':files.move,'delete_work_file':files.delete,'recover_artifacts':Artifacts(w).recover,'job_directories':files.directories,'claim_job':flow.claim,'renew_claim':flow.renew,'release_job':flow.release,'resolve_job':flow.resolve,'bind_session':flow.bind,'resume_session':resume_session,'prepare_handoff':flow.prepare_handoff,'read_handoff':flow.read_handoff,'accept_handoff':flow.accept_handoff,'acknowledge_handoff':flow.acknowledge_handoff,'append_timeline':timeline.append,'list_projects':w.project_query,'create_project':w.project_create,'update_index':retrieval.update,'search_sources':retrieval.search,'read_source':retrieval.read,'create_job':jobs.create,'list_jobs':jobs.query,'list_jobs_full':jobs.list,'resume_job':resume,'checkpoint_job':jobs.checkpoint,'record_task_feedback':jobs.record_feedback,'doctor':Maintenance(w).doctor,'report_issue':feedback.report_issue}
+        methods={'get_project':projects.get,'update_project':projects.update,'write_work_file':files.write,'publish_file':files.publish,'move_work_file':files.move,'delete_work_file':files.delete,'recover_artifacts':Artifacts(w).recover,'job_directories':files.directories,'claim_job':flow.claim,'renew_claim':flow.renew,'release_job':flow.release,'resolve_job':flow.resolve,'bind_session':flow.bind,'resume_session':resume_session,'prepare_handoff':flow.prepare_handoff,'read_handoff':flow.read_handoff,'accept_handoff':flow.accept_handoff,'acknowledge_handoff':flow.acknowledge_handoff,'append_timeline':timeline.append,'list_projects':w.project_query,'create_project':w.project_create,'update_index':retrieval.update,'search_sources':retrieval.search,'read_source':retrieval.read,'create_job':jobs.create,'list_jobs':jobs.query,'list_jobs_full':jobs.list,'resume_job':resume,'checkpoint_job':jobs.checkpoint,'record_task_feedback':jobs.record_feedback,'doctor':Maintenance(w).doctor,'report_issue':feedback.report_issue,'open_work':Entry(w, resume).open}
         methods.update(extra)
         for name in ('record_host_binding', 'list_host_bindings', 'request_publication', 'resolve_publication', 'list_decisions', 'record_sent', 'list_sent', 'read_sent_version',
                      'checkout_draft', 'commit_draft', 'list_scenarios',

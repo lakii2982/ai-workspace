@@ -14,6 +14,16 @@
 - save_work_checkpoint(jid,revision,context_patch?,patch?,lease_token?)：创建快照后更新任务；在此之前业务文件与记忆已保存。context包含working_on/resume_note/working_files/memory_refs/reviewed_files/base_commit/checkpoint_commit/checkpoint_ref，可缺省。
 - Git快照保存refs/aiws/observations及checkpoints；不改HEAD/分支/真实index。文件变更以Git blob为版本；旧manifest和受控发布校验不因此删除。
 
+## open_work 会话入口
+
+- open_work(intent, project?, jid?, session_id?, query='', request_id?, create_project=false, new_task=false)：聊天会话的统一工作入口。intent 必填并在每个响应中原样返回；project 接受项目 ID、名称或别名（大小写不敏感）；显式 jid 与显式 project 优先于 session 绑定。参数：intent(str)、project(str,可选)、jid(str,可选)、session_id(str,可选)、query(str,默认'')、request_id(str,可选)、create_project(bool,默认false)、new_task(bool,默认false)。
+- status=opened：显式项目/别名唯一命中、已绑定 session 或显式 jid 时返回 work（与 resume_job 相同结构的接续载荷，含 work_context/scenarios/publication_decisions/context_entry），只读取目标任务，不扫描任务列表；created 报告本次是否新建了项目或任务。显式项目下唯一进行中任务视为相关工作直接打开；多任务命中返回候选。
+- status=candidates：project/jid/session 均无法定位时返回有界项目候选（≤8，附 has_more_projects）、原始 intent 与 created={'project':false,'task':false}；提供 query 时附跨项目任务线索（含 project_ids 归属）。歧义（多项目/多任务/别名撞名）返回 match=ambiguous 与可区分候选；未知 project 返回 unknown_project 与近似候选。候选路径零写入：不创建项目、任务、会话文件或创建请求；即使工作区只有一个项目也不代选。
+- 创建必须显式且幂等：new_task=true 且提供 request_id 才创建任务——标题取 intent 首行（≤80 字符），goal 保存完整 intent，scope 为单项目，复用 create_job 的 request_id 契约（同参重试返回原任务并带 replayed=true；同 request_id 不同参数返回 CONFLICT）。不同 request_id 是不同工作，绝不静默挂到已活跃任务上。缺 request_id 报 INVALID_ARGUMENT，不产生部分写入。
+- create_project=true 仅在名称/别名/ID 均未命中时按名称创建项目（命中即复用；PRJ- 前缀只作查找不作创建名）。该路径属于工作区级分配，走独占 gate 锁。
+- 会话只在成功打开时绑定；session 已绑定其他任务时打开新工作不改绑（state=elsewhere，附显式 bind_session 切换提示），候选路径原样报告绑定状态（bound/unbound）。
+- 跨项目任务在 work_context.project_candidates 列出目标项目，context_entry 指向 prepare_work_context；目标项目必须显式选择。旧数据（缺 context/directory_name 的 job、旧 session 文件）直接兼容。
+
 ## 项目记忆条目（Claude 风格）
 
 每个项目在 `记忆/` 下同时保存两类记忆：`TIMELINE.md` 是只追加的任务事件（上一节的 timeline memory），`MEMORY.md` 与 `条目/` 是长期事实。条目一条记忆一个 Markdown 文件，frontmatter 为 `name`、`description`、`metadata.type`（user/feedback/project/reference，可附 `created`、`updated`、`source`），正文用 `[[名称]]` 互链。文件是权威，`MEMORY.md` 由核心根据文件重建；手工改动索引会在 `index_drift` 中报告，下一次写入时修复。

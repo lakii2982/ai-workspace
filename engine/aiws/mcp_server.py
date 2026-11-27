@@ -133,6 +133,11 @@ def resolve_job(project:str|None=None,query:str='',jid:str|None=None)->dict:
     return invoke('resolve_job',dict(project=project,query=query,jid=jid))
 
 @server.tool()
+def open_work(intent:str,project:str|None=None,jid:str|None=None,session_id:str|None=None,query:str='',request_id:str|None=None,create_project:bool=False,new_task:bool=False)->dict:
+    """Single chat entry: explicit project/alias, bound session or jid opens the work; otherwise bounded candidates with the original intent and no writes. New project/task only via explicit create_project/new_task, and new_task needs a stable request_id reused verbatim on retry."""
+    return invoke('open_work',dict(intent=intent,project=project,jid=jid,session_id=session_id,query=query,request_id=request_id,create_project=create_project,new_task=new_task))
+
+@server.tool()
 def bind_session(session_id:str,jid:str)->dict:
     return invoke('bind_session',dict(session_id=session_id,jid=jid))
 

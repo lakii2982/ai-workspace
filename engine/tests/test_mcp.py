@@ -59,3 +59,32 @@ def test_real_stdio(tmp_path):
                 assert preview['ok'] and preview['result']['requires_confirmation'] is True
                 assert str(tmp_path) not in preview['result']['issue']['body']
     asyncio.run(run())
+
+
+def test_open_work_stdio(tmp_path):
+    w=Workspace(tmp_path);w.init();p=w.project_create('入口')
+    async def run():
+        params=StdioServerParameters(command=sys.executable,args=['-m','aiws.mcp_server_entry'],env={**os.environ,'AIWS_WORKSPACE':str(tmp_path)})
+        async with stdio_client(params) as (read,write):
+            async with ClientSession(read,write) as session:
+                await session.initialize()
+                tools=await session.list_tools();assert 'open_work' in {t.name for t in tools.tools}
+                # Unknown request: bounded candidates, original intent, no writes.
+                choices=payload(await session.call_tool('open_work',{'intent':'写年度总结'}))
+                assert choices['result']['status']=='candidates'
+                assert choices['result']['reason']=='no_project'
+                assert choices['result']['intent']=='写年度总结'
+                assert choices['result']['projects']==[{'project_id':'PRJ-0001','name':'入口','status':'active','path':p['path']}]
+                # Explicit intentional creation through the same entry.
+                opened=payload(await session.call_tool('open_work',{'intent':'写年度总结','project':'入口','new_task':True,'request_id':'mcp-entry-1'}))
+                result=opened['result']
+                assert result['status']=='opened' and result['created']=={'project':False,'task':True}
+                assert result['work']['goal']=='写年度总结'
+                assert result['work']['scope']['project_ids']==['PRJ-0001']
+                # Retries through separate CLI processes replay the same task.
+                again=payload(await session.call_tool('open_work',{'intent':'写年度总结','project':'入口','new_task':True,'request_id':'mcp-entry-1'}))
+                assert again['result']['work']['job_id']==result['work']['job_id']
+                assert again['result']['replayed'] is True
+                jobs=payload(await session.call_tool('list_jobs',{'project_id':'PRJ-0001'}))
+                assert [x['job_id'] for x in jobs['result']['items']]==[result['work']['job_id']]
+    asyncio.run(run())
