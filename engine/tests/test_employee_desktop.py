@@ -79,6 +79,11 @@ def test_office_handoff_publication_and_scenario(tmp_path):
     versions = call('list_sent', dict(project_id=pid, name=request['target_name']))['items']
     assert [item['source_hash'] for item in versions] == [replacement['hash'], saved['hash']]
     assert versions[1]['version']['state'] == 'archived'
+    assert versions[1]['version']['path'].endswith('.docx')
+    assert Document(tmp_path / versions[1]['version']['path']).paragraphs[0].text=='核对后 88'
+    assert call('resolve_publication',approve)['version']['path']==versions[1]['version']['path']
+    retrospective=call('record_sent',dict(**args,name=request['target_name'],source_hash=saved['hash'],channel='当时的邮件'))
+    assert retrospective['source_hash']==saved['hash']
     assert call('read_sent_version', dict(project_id=pid, sent_id=sent['sent_id']))['content_hex']
 
     scenario_args = dict(jid=jid, title='按客户询价', instructions='从当前任务取得客户名与产品清单。', reason='保存本次做法')

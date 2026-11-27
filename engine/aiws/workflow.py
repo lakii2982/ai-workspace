@@ -3,7 +3,7 @@ import hashlib
 import re
 import time
 import uuid
-from .core import Error, now, put_json, load
+from .core import Error, digest, now, put_json, load
 from .jobs import Jobs
 
 class Workflow:
@@ -73,11 +73,22 @@ class Workflow:
         if not isinstance(note, str) or not note.strip() or not isinstance(requested_agent, str) or type(independent_review) is not bool:
             raise Error('INVALID_ARGUMENT', 'Handoff note and options are invalid')
         job = self.jobs.get(jid)
+        from .context import Context
+        files=[]
+        for pid in job['scope']['project_ids']:
+            project=self.w.project_for(pid)
+            draft=Context(self.w).primary_draft(project,job,None)
+            if draft:
+                relative=project['path']+'/'+draft['path']
+                target=self.w.path(relative)
+                self.w.allowed(relative,job['scope'],drafts=True)
+                if target.is_file():
+                    files.append({'project_id':pid,'path':relative,'hash':digest(target)})
         handoff_id = uuid.uuid4().hex
         record = dict(schema_version=1, handoff_id=handoff_id, jid=jid, note=note.strip(),
                       requested_agent=requested_agent.strip() or None,
                       independent_review=independent_review, created_at=now(), status='prepared',
-                      task=self.jobs.brief_record(job),
+                      task=self.jobs.brief_record(job),files=files,
                       resume=dict(operation='resume_job', jid=jid))
         path = self.w.path(f'.workspace/handoffs/{jid}/{handoff_id}.json')
         put_json(path, record)

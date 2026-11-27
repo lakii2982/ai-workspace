@@ -158,8 +158,17 @@ class Desktop:
         artifact = next((item for item in self.jobs.get(jid)['artifacts']
                          if item['path'] == path and item['hash'] == source_hash
                          and item['purpose'] == 'deliverable' and item['status'] == 'approved'), None)
+        if not re.fullmatch(r'[0-9a-f]{64}', source_hash):
+            raise Error('INVALID_ARGUMENT', 'Expected the published SHA-256')
         if artifact is None:
-            raise Error('NOT_FOUND', 'Published deliverable version not found')
+            # A customer may report a send after another version was published.
+            decisions=self.list_decisions(project_id, jid, state='published', limit=100)
+            while not any(r['name']==name and r['source_hash']==source_hash for r in decisions['items']):
+                if not decisions['has_more']:
+                    raise Error('NOT_FOUND', 'Published deliverable version not found')
+                decisions=self.list_decisions(project_id,jid,state='published',limit=100,offset=decisions['next_offset'])
+        if self.published_version(jid,project_id,name,source_hash)['state']=='unavailable':
+            raise Error('NOT_FOUND', 'Published deliverable version is unavailable')
         evidence = dict(kind='user_statement')
         if evidence_path:
             self.w.allowed(evidence_path, self.jobs.get(jid)['scope'])
@@ -178,15 +187,19 @@ class Desktop:
         return record
 
     def sent_version(self, record):
-        folder = self.task_folder(record['jid'], record['project_id'])
-        current = self.w.path(Path(folder['deliverables']) / record['name'])
-        if current.is_file() and digest(current) == record['source_hash']:
-            return dict(state='current', path=str(current.relative_to(self.w.root)), hash=record['source_hash'])
-        archived = self.w.path(Path('.workspace/history/files') / record['source_hash'])
-        if archived.is_file() and digest(archived) == record['source_hash']:
-            return dict(state='archived', path=str(archived.relative_to(self.w.root)), hash=record['source_hash'],
-                        read=dict(operation='read_sent_version', project_id=record['project_id'], sent_id=record['sent_id']))
-        return dict(state='unavailable', hash=record['source_hash'])
+        version=self.published_version(record['jid'],record['project_id'],record['name'],record['source_hash'])
+        if version['state']=='archived':
+            version['read']=dict(operation='read_sent_version',project_id=record['project_id'],sent_id=record['sent_id'])
+        return version
+
+    def published_version(self,jid,project_id,name,source_hash):
+        folder=self.task_folder(jid,project_id)
+        current=self.w.path(Path(folder['deliverables'])/name)
+        named=current.parent/'历史版本'/(current.stem+'_'+source_hash[:12]+current.suffix)
+        for state,path in [('current',current),('archived',named),('archived',self.w.path(Path('.workspace/history/files')/source_hash))]:
+            if path.is_file() and digest(path)==source_hash:
+                return dict(state=state,path=str(path.relative_to(self.w.root)),hash=source_hash)
+        return dict(state='unavailable',hash=source_hash)
 
     def list_sent(self, project_id, jid=None, name=None, source_hash=None, limit=20, offset=0):
         self.w.project_for(project_id)
@@ -200,7 +213,9 @@ class Desktop:
                    if (not name or record['name'] == name)
                    and (not source_hash or record['source_hash'] == source_hash)]
         records.sort(key=lambda record: record['recorded_at'], reverse=True)
-        return page([{**record, 'version':self.sent_version(record)} for record in records], limit, offset)
+        result=page(records,limit,offset)
+        result['items']=[{**record,'version':self.sent_version(record)} for record in result['items']]
+        return result
 
     def read_sent_version(self, project_id, sent_id):
         record = next((item for item in self.list_sent(project_id, limit=100)['items']
@@ -210,7 +225,10 @@ class Desktop:
         version = record['version']
         if version['state'] == 'unavailable':
             raise Error('NOT_FOUND', 'Recorded version is unavailable')
-        return {**version, 'content_hex':self.w.path(version['path']).read_bytes().hex(), 'encoding':'hex'}
+        content=self.w.path(version['path']).read_bytes()
+        if hashlib.sha256(content).hexdigest()!=version['hash']:
+            raise Error('CONFLICT','File version changed during read')
+        return {**version, 'content_hex':content.hex(), 'encoding':'hex'}
 
     def resolve_publication(self, jid, project_id, decision_id, approve, source_hash, note='', lease_token=None):
         self.guard(jid, lease_token, allow_closed=True)
@@ -221,6 +239,7 @@ class Desktop:
             raise Error('CONFLICT', 'Decision must identify the reviewed version')
         outcome = 'published' if approve else 'returned'
         if record['state'] == outcome:
+            if approve:return {**record,'version':self.published_version(jid,project_id,record['name'],source_hash)}
             return record
         if record['state'] != 'pending':
             raise Error('INVALID_STATE', 'Decision already resolved')
@@ -240,4 +259,5 @@ class Desktop:
         record.update(state=outcome, note=note, resolved_at=now())
         record.pop('publishing', None)
         put_json(path, record)
+        if approve:return {**record,'version':self.published_version(jid,project_id,record['name'],source_hash)}
         return record

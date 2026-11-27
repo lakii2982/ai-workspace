@@ -58,7 +58,7 @@ get_project_overview 提供任务分组与成果、问题、下一步；不会�
 4. 新任务必须包含项目范围和稳定request_id。相同request_id重试不重复创建；同ID不同内容拒绝。
 5. `call bind_session`绑定session_id/jid，换客户端用resume_session恢复最新状态。不要把上次会话的文本当成最新事实。
    一次性意见用 `record_task_feedback` 留在当前任务。跨任务有效的项目约定用 `save_memory_note` 保存为 `project` 或 `feedback` 条目，失效时用 `delete_memory_note` 撤销。项目约定不跨项目继承。个人场景由 `save_scenario` 保存，与来源项目无绑定，可以在其他项目的新任务用 `apply_scenario` 固定版本。
-   要求其他 Agent 或独立复核时，先 `prepare_handoff` 生成可带走的接续包。未有接收会话时，它只会显示待认领和当前 Agent 继续的回退方案。接收方绑定同一任务后调用 `accept_handoff`，只记录受管会话认领。人工明确说已接收时才以 `acknowledge_handoff` 单独留痕，两者都不代表外部渠道送达。
+   要求其他 Agent 或独立复核时，先 `prepare_handoff` 生成带主稿路径、文件指纹与复核说明的接续包。未有接收会话时，它只会显示待认领和当前 Agent 继续的回退方案。接收方绑定同一任务后调用 `accept_handoff`，只记录受管会话认领。人工明确说已接收时才以 `acknowledge_handoff` 单独留痕，两者都不代表外部渠道送达。
 6. `call write_work_file`按jid/project_id/name/kind写工作稿或过程材料，旧文件必须带expected_hash。`call publish_file`须绑定source_hash和具体用户确认，旧成果进入同目录历史版本。没有成果表。
 7. 重要决策、范围变化和交付结果用append_timeline写入所属项目；必须提供事件日期、记录日期、性质、状态、影响、责任人、后续和来源，带旧hash；事件ID可安全重试。
 8. 完成任务先 review，再 completed。飞书模式必须给每条验收条件提供verification中的criterion/path/hash，且没有未解决阻塞。完成技术工作不代表用户已批准文件发布。交接用release_job并提供next_steps。
@@ -79,7 +79,7 @@ get_project_overview 提供任务分组与成果、问题、下一步；不会�
 
 ### 定稿与已发
 
-`publish_file` 只表示定稿已经进入成果目录。员工明确表示已经发出后，才用 `record_sent` 记录该成果的 `source_hash`，没有链接也可以记录为用户陈述。若已有渠道回执，将回执文件放入项目资料并传其路径与 hash，才会标为 `channel_receipt`。渠道名或任意字符串本身不构成外部核实。它不会主动发送或访问渠道，改版后应对新 hash 另记一条，不能把旧版已发泛化成新版已发。
+`publish_file` 只表示定稿已经进入成果目录。员工明确表示已经发出后，才用 `record_sent` 记录该成果的 `source_hash`，没有链接也可以记录为用户陈述。若已有渠道回执，将回执文件放入项目资料并传其路径与 hash，才会标为 `channel_receipt`。渠道名或任意字符串本身不构成外部核实。定稿与历史发送记录给出可打开的版本路径。确认过的旧版可在后续改版后补记发送。它不会主动发送或访问渠道，改版后应对新 hash 另记一条，不能把旧版已发泛化成新版已发。
 
 不交付的稿子用 `move_work_file` 移入 `过程材料/`（字节不变，需要当前 hash），删除工作稿用 `delete_work_file`（旧字节进入历史）。两者都拒绝存在未提交 checkout 或待决发布的文件；成果正本不能删除，改版请发布新版本。
 

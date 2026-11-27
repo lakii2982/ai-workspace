@@ -40,8 +40,10 @@ def test_handoff_distinguishes_session_claim_from_human_acknowledgement(tmp_path
     service=Service(tmp_path);service.call('init', {})
     project=service.call('create_project', {'name':'交接'})
     job=service.call('create_job', dict(title='复核报价', goal='独立复核', scope=scope(project['project_id'])))
+    draft=service.call('write_work_file',dict(jid=job['job_id'],project_id=project['project_id'],name='报价.md',content='演练报价'))
     handoff=service.call('prepare_handoff', dict(jid=job['job_id'], note='核对总价和交期',
         requested_agent='reviewer', independent_review=True))
+    assert handoff['files']==[{'project_id':project['project_id'],'path':draft['path'],'hash':draft['hash']}]
     assert handoff['handoff']['status'] == 'prepared'
     assert handoff['handoff']['fallback'] == 'wait_for_independent_reviewer'
     with pytest.raises(Error, match='not bound'):
