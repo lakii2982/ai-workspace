@@ -230,7 +230,7 @@ def delete_memory_note(project_id:str,name:str,expected_hash:str|None=None)->dic
 
 @server.tool()
 def read_project_file(project_id:str,path:str,commit:str|None=None)->dict:
-    """Read actual current or observed file content, including unregistered project inputs and drafts."""
+    """Read actual current or observed file content. Accepts a project-relative path or the file path returned by a workspace write; returns the source SHA-256."""
     return invoke('read_project_file',dict(project_id=project_id,path=path,commit=commit))
 
 @server.tool()

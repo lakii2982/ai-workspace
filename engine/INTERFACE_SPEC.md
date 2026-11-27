@@ -110,3 +110,5 @@ DELIVERABLE_REQUIRED：任务转completed时，若 工作/JOB/工作稿/ 仍有�
 - 正文环境块只含框架版本、系统版本、Python 版本、工作空间格式、提交时间和客户端名称；不含工作空间路径、项目名称、文件名或文件内容。`include_environment=false` 可省略整个环境块。
 - 默认仓库为 `lakii2982/ai-workspace`，可用环境变量 `AIWS_ISSUE_REPO=owner/name` 覆盖（用于开发实例或镜像）。
 - 参数上限：`title` 120 字符、`details` 8000、`expected` 2000、`component` 200、`steps` 20 条且每条 500；`title` 会折叠为单行。
+
+读回主稿时可将写入回执中的 path 直接交给 read_project_file，也可以传项目相对路径或已选项目内的绝对路径。返回的 sha256 对应实际回读的字节。

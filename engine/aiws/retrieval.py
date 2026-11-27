@@ -306,7 +306,13 @@ class Retrieval:
         from .git_store import GitStore
         project=self.w.project_for(project_id)
         relative=Path(path)
-        if relative.is_absolute() or '..' in relative.parts:raise Error('OUT_OF_ROOT','Project-relative path required')
+        if '..' in relative.parts:raise Error('OUT_OF_ROOT','Path must stay in the selected project')
+        if relative.is_absolute():
+            try: relative=relative.resolve().relative_to(self.w.path(project['path']))
+            except ValueError:raise Error('OUT_OF_ROOT','File is outside the selected project') from None
+        elif relative.parts[:1]==('项目',):
+            try: relative=relative.relative_to(project['path'])
+            except ValueError:raise Error('INVALID_SCOPE','File belongs to another project') from None
         target=self.w.path(project['path']+'/'+relative.as_posix())
         git=GitStore(self.w,project_id)
         version=commit
