@@ -6,7 +6,7 @@
 
 在项目范围内运行 `./aiws call initialize_project_git --params '{"project_id":"PRJ-0001"}'` 启用项目独立版本库。框架源码仓库不承载业务文件；无远端也可使用。
 
-Agent 开始工作先定位并恢复已有任务。resume_job/resume_session 直接返回当前任务的工作位置、检查点和下一步。已纳管的单项目任务会提示哪些已读资料有变化。快速接续不刷新索引；需要完整项目概览或按意图查资料时，再调用 prepare_work_context(jid=..., intent='选型 维护')。未启用 Git 的项目仍可恢复进度，但不会被标为已检查资料版本。
+Agent 开始工作先定位并恢复已有任务。resume_job/resume_session 直接返回当前任务的工作位置、检查点和下一步。默认接续会限制记忆条目数量，并在 `memory.resume_budget` 明示总数与省略数，`progress` 保留主稿与未完事项，`attention` 优先显示待审和阻塞计数。需要完整项目概览或按意图查资料时，再调用 prepare_work_context(jid=..., intent='选型 维护')。未启用 Git 的项目仍可恢复进度，但不会被标为已检查资料版本。
 
 手改文件或丢入新资料后不需要先提交；系统比较阶段快照与当前目录。调用 read_project_file(project_id,path,commit=observation.commit) 阅读观察版本；path 是项目相对路径，含工作稿与未登记资料。compare_project_file 可提取旧新版办公文档文本差异。不支持的格式返回明确可读性结果。
 

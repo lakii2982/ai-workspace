@@ -4,7 +4,7 @@
 
 - initialize_project_git(project_id)：显式启用项目根独立 Git；不变更框架根仓库。
 - prepare_work_context(project_id?,jid?,session_id?,intent='',detail='brief')：定位优先 jid、绑定session、明确项目；返回 identity/project_brief/task_context/git_status/observation/git_changes/memory/memory_references/reading_queue/coverage/expand。观察可创建Git对象但不推进任务revision；无Git项目仍可读背景。
-- resume_job/resume_session：保留任务结果字段，并附带快速接续的 work_context，只读取目标任务，不扫描任务列表或刷新检索索引。明确的单项目可返回主稿位置、Git 观察和已读资料的变化；无法确定唯一主稿或项目时不猜。若受控保存已落盘但清单未保存，返回 `recovery` 和 `recover_artifacts` 下一动作，只扫描该任务的恢复日志。需要完整项目上下文时，调用显式入口 prepare_work_context 或 get_project_overview。
+- resume_job/resume_session：保留任务结果字段，并附带快速接续的 work_context，只读取目标任务，不扫描任务列表或刷新检索索引。默认接续的 timeline memory 受预算限制，`memory.resume_budget` 说明 totals、omitted 与 full 展开入口，`progress` 保留主稿工作位置、下一步和未完事项，`attention` 给出待审/阻塞计数。明确的单项目可返回主稿位置、Git 观察和已读资料的变化；无法确定唯一主稿或项目时不猜。若受控保存已落盘但清单未保存，返回 `recovery` 和 `recover_artifacts` 下一动作，只扫描该任务的恢复日志。需要完整项目上下文时，调用显式入口 prepare_work_context 或 get_project_overview。
 - get_project_overview(project_id,detail='brief')：完整分页聚合后裁剪，coverage提供省略数和任务revision。
 - read_project_file(project_id,path,commit=None)：项目相对路径，读取当前观察或指定Git版本；返回文本/locator/chunks及readability，不要求artifact登记。
 - compare_project_file(project_id,path,before,after=None)：提取前后文本与diff；受限格式不会伪造差异。
