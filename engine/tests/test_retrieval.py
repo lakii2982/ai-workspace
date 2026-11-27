@@ -1,5 +1,7 @@
 from pathlib import Path
 from aiws.core import Workspace, Error
+from aiws.files import Files
+from aiws.jobs import Jobs
 from aiws.retrieval import Retrieval
 from docx import Document
 from openpyxl import Workbook
@@ -60,3 +62,26 @@ def test_formats_isolation_and_read(tmp_path):
     (folder/'old.doc').write_bytes(b'old')
     codes={x['code'] for x in r.update()['failures']}
     assert codes=={'PARSE_ERROR','PARSE_UNSUPPORTED'}
+
+
+def test_read_project_html_quote_keeps_title_table_price_and_delivery_without_scripts(tmp_path):
+    w,a,b,scope=setup(tmp_path)
+    job=Jobs(w).create('报价首稿','输出客户报价',scope)
+    quote='''<!doctype html>
+    <html><head><title>青瞳视觉动捕系统报价单</title>
+    <style>.price { color: red; }</style><script>window.secret = '不要执行';</script></head>
+    <body><h1>青瞳视觉动捕系统报价单</h1><table>
+      <tr><th>产品</th><th>含税金额</th><th>交期</th></tr>
+      <tr><td>U4 动作捕捉相机</td><td>¥12,800.00</td><td>签约后 15 个工作日</td></tr>
+    </table></body></html>'''
+    written=Files(w).write(job['job_id'],a['project_id'],'客户报价单.html',quote)
+    path=written['path'].removeprefix(a['path']+'/')
+    result=Retrieval(w).read_project_file(a['project_id'],path)
+    chunks={item['locator']:item['text'] for item in result['chunks']}
+    assert result['readability']=='readable'
+    assert chunks['html:title:1']=='青瞳视觉动捕系统报价单'
+    assert chunks['heading:h1:1']=='青瞳视觉动捕系统报价单'
+    assert chunks['table:1/row:2/cell:2']=='¥12,800.00'
+    assert chunks['table:1/row:2/cell:3']=='签约后 15 个工作日'
+    assert 'U4 动作捕捉相机' in result['text']
+    assert '不要执行' not in result['text']

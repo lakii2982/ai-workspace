@@ -249,7 +249,7 @@ class Context:
                 keywords.append(term)
         related = Timeline(self.w).list_memory(project_id,query=' '.join(keywords),limit=20) if keywords else None
         draft = self.primary_draft(p, j, observation) if j else None
-        if draft:
+        if draft and draft.get('path'):
             primary.add(draft['path'])
         pending_updates=[] if status.get('enabled') else ['Project Git is not initialized']
         if observation:
@@ -308,8 +308,11 @@ class Context:
             marked = [self.relative_file(project, a['path']) for a in job['artifacts']
                       if a['path'].startswith(project['path']+'/'+folder)]
         paths = set(marked)
-        if len(paths) != 1:
+        if not paths:
             return None
+        if len(paths) > 1:
+            return dict(state='ambiguous', candidates=[dict(path=path) for path in sorted(paths)],
+                        hint='Several draft candidates are marked; choose one explicitly before resuming it')
         path = paths.pop()
         if observation:
             return dict(path=path, state='available' if path in observation['files'] else 'missing',

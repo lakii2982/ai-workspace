@@ -4,12 +4,101 @@ import sqlite3
 from pathlib import Path
 import tempfile
 import difflib
+import re
+from html.parser import HTMLParser
 from .core import Error, now, load
+
+
+def _clean_html_text(parts):
+    return re.sub(r'\s+', ' ', ''.join(parts)).strip()
+
+
+class _HTMLExtractor(HTMLParser):
+    """Extract visible HTML text only; this parser never loads or executes markup."""
+    def __init__(self):
+        super().__init__(convert_charrefs=True)
+        self.out=[];self.ignored=0;self.in_head=0;self.in_title=0;self.title=[];self.headings=[]
+        self.body=[];self.tables=[];self.cells=[]
+        self.title_count=0;self.heading_counts={};self.table_count=0
+
+    def handle_starttag(self, tag, attrs):
+        tag=tag.lower()
+        if tag in ('script','style'):
+            self.ignored+=1;return
+        if self.ignored:return
+        if tag=='head':self.in_head+=1
+        elif tag=='title':self.in_title+=1;self.title=[]
+        elif tag in ('h1','h2','h3','h4','h5','h6'):
+            self.headings.append((tag,[]))
+        elif tag=='table':
+            self.table_count+=1;self.tables.append({'number':self.table_count,'row':0,'cell':0})
+        elif tag=='tr' and self.tables:
+            self.tables[-1]['row']+=1;self.tables[-1]['cell']=0
+        elif tag in ('td','th') and self.tables:
+            table=self.tables[-1];table['cell']+=1
+            self.cells.append((table['number'],table['row'],table['cell'],[]))
+        elif tag=='br':
+            self._append('\n')
+
+    def handle_endtag(self, tag):
+        tag=tag.lower()
+        if tag in ('script','style'):
+            if self.ignored:self.ignored-=1
+            return
+        if self.ignored:return
+        if tag=='head':self.in_head=max(0,self.in_head-1)
+        elif tag=='title':
+            text=_clean_html_text(self.title)
+            if text:
+                self.title_count+=1;self.out.append((f'html:title:{self.title_count}',text))
+            self.title=[]
+            self.in_title=max(0,self.in_title-1)
+        elif tag in ('h1','h2','h3','h4','h5','h6') and self.headings:
+            level,parts=self.headings.pop();text=_clean_html_text(parts)
+            if text:
+                self.heading_counts[level]=self.heading_counts.get(level,0)+1
+                self.out.append((f'heading:{level}:{self.heading_counts[level]}',text))
+        elif tag in ('td','th') and self.cells:
+            number,row,cell,parts=self.cells.pop();text=_clean_html_text(parts)
+            if text:
+                self.out.append((f'table:{number}/row:{row}/cell:{cell}',text))
+        elif tag=='table' and self.tables:
+            self.tables.pop()
+
+    def handle_data(self, data):
+        if not self.ignored:
+            self._append(data)
+
+    def _append(self, data):
+        if self.in_title:self.title.append(data)
+        if self.headings:self.headings[-1][1].append(data)
+        if self.cells:self.cells[-1][3].append(data)
+        if not self.in_head:self.body.append(data)
+
+    def chunks(self):
+        body=_clean_html_text(self.body)
+        return self.out + ([('html:body:1',body)] if body else [])
+
+
+def extract_html(path):
+    try:
+        text=path.read_text(encoding='utf-8-sig')
+    except UnicodeDecodeError as error:
+        raise Error('PARSE_LIMITED','HTML is not UTF-8 text') from error
+    parser=_HTMLExtractor()
+    try:
+        parser.feed(text);parser.close()
+    except Exception as error:
+        raise Error('PARSE_ERROR','Malformed HTML could not be read') from error
+    return parser.chunks()
+
 
 def extract(path):
     ext=path.suffix.lower()
     if ext in ('.md','.txt'):
         return [(f'line:{i}',line) for i,line in enumerate(path.read_text(encoding='utf-8-sig').splitlines(),1) if line.strip()]
+    if ext in ('.html','.htm'):
+        return extract_html(path)
     if ext=='.docx':
         from docx import Document
         doc=Document(path)
