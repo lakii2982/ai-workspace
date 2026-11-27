@@ -82,6 +82,11 @@ def save_artifact(jid:str,relative:str,content:str|None=None,content_base64:str|
     """Save text/binary with expected SHA256. confirm=true only after actual user authorization to publish formal knowledge."""
     return invoke('save_artifact',dict(jid=jid,relative=relative,content=content,content_base64=content_base64,expected_hash=expected_hash,confirm=confirm,purpose=purpose,lease_token=lease_token))
 
+@server.tool()
+def receive_source(jid:str,project_id:str,name:str,content:str|None=None,content_base64:str|None=None,expected_hash:str|None=None,confirm:bool=False,lease_token:str|None=None,source_ref:str|None=None)->dict:
+    """File a chat attachment the host has actually read into the project 资料 folder, by filename. The host supplies the real bytes (text or base64); never invent content — if the original attachment could not be read, say so honestly instead of calling this. Identical bytes replay without changes; different bytes need confirm=true and the current expected_hash."""
+    return invoke('receive_source',dict(jid=jid,project_id=project_id,name=name,content=content,content_base64=content_base64,expected_hash=expected_hash,confirm=confirm,lease_token=lease_token,source_ref=source_ref))
+
 def main():server.run(transport='stdio')
 
 @server.tool(annotations=ToolAnnotations(readOnlyHint=True, destructiveHint=False))

@@ -242,8 +242,9 @@ class Jobs:
 
 class Artifacts:
     def __init__(self,w):self.w=w;self.jobs=Jobs(w)
-    def save(self,jid,relative,content,expected_hash=None,confirm=False,purpose='draft',lease_token=None,allow_closed=False):
+    def save(self,jid,relative,content,expected_hash=None,confirm=False,purpose='draft',lease_token=None,allow_closed=False,detail=None):
         j=self.jobs.get(jid)
+        if detail is not None and not isinstance(detail,dict):raise Error('INVALID_ARGUMENT','Event detail must be an object')
         from .workflow import check_lease
         from .remote_store import enabled
         # 已关闭任务无人持有、也不会被并发编辑：仅允许有确认留痕的"事后补发布"（存量迁移）跳过租约。
@@ -268,6 +269,7 @@ class Artifacts:
                 atomic(conflict,content)
                 raise Error('CONFLICT','File changed; incoming revision preserved in history/conflicts')
             event={'schema_version':1,'job_id':jid,'path':relative,'old_hash':actual,'new_hash':hashlib.sha256(content).hexdigest(),'confirmed':confirm,'actor':'local-user' if confirm else j['last_agent'],'time':now()}
+            if detail:event={**event,**detail}
             event_id=hashlib.sha256((relative+now()).encode()).hexdigest()
             if target.exists():
                 atomic(self.w.path(f'.workspace/history/files/{actual}'),target.read_bytes())

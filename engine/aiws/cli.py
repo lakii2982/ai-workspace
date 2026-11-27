@@ -28,7 +28,7 @@ def main():
         elif a.command=='index':op='update_index' if a.action=='update' else None
         elif a.command=='search':
             op='search_sources';args.update(query=a.query,scope={'include_company':a.company,'include_professional':a.professional,'project_ids':a.project,'topic_ids':[]})
-        elif a.command=='source':op='read_source' if a.action=='read' else None
+        elif a.command=='source':op={'read':'read_source','receive':'receive_source'}.get(a.action)
         elif a.command=='artifact':op='save_artifact' if a.action=='save' else None
         else:
             op={'create':'create_job','list':'list_jobs','resume':'resume_job','checkpoint':'checkpoint_job'}.get(a.action)

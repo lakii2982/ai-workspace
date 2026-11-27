@@ -19,7 +19,7 @@ _EXCLUSIVE_OPERATIONS = {
 _JOB_WRITES = {
     'checkpoint_job', 'claim_job', 'renew_claim', 'release_job', 'mark_context_read',
     'request_publication', 'resolve_publication', 'checkout_draft', 'commit_draft',
-    'save_scenario', 'apply_scenario', 'save_work_checkpoint', 'save_artifact', 'write_work_file',
+    'save_scenario', 'apply_scenario', 'save_work_checkpoint', 'save_artifact', 'receive_source', 'write_work_file',
     'publish_file', 'move_work_file', 'delete_work_file', 'record_sent',
 }
 _PROJECT_OPERATIONS = {'get_project', 'update_project', 'append_timeline', 'initialize_project_git',
@@ -123,12 +123,12 @@ class Service:
                      'checkout_draft', 'commit_draft', 'list_scenarios',
                      'read_scenario', 'save_scenario', 'apply_scenario'):
             methods[name] = getattr(desktop, name)
-        if operation=='save_artifact':
+        if operation in ('save_artifact','receive_source'):
             args=dict(args)
             content=args.pop('content',None);encoded=args.pop('content_base64',None)
             if (content is None)==(encoded is None):raise Error('INVALID_ARGUMENT','Supply text or base64, exclusively')
             args['content']=base64.b64decode(encoded,validate=True) if encoded is not None else content.encode('utf-8')
-            return Artifacts(w).save(**args)
+            return (files.receive if operation=='receive_source' else Artifacts(w).save)(**args)
         if operation not in methods:raise Error('INVALID_ARGUMENT','Unknown operation')
         result=methods[operation](**args)
         if operation in ('get_project','create_job'):

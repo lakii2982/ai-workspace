@@ -12,6 +12,22 @@ class Files:
     def directories(self,jid):
         j=Jobs(self.w).get(jid)
         return [{'project_id':p['project_id'],'work':p['path']+'/工作/'+j.get('directory_name',jid),'deliverables':p['path']+'/成果/'+j.get('directory_name',jid)} for p in [self.w.project_for(pid) for pid in j['scope']['project_ids']]]
+    def receive(self,jid,project_id,name,content,expected_hash=None,confirm=False,lease_token=None,source_ref=None):
+        """Chat attachment intake: the host hands over bytes it actually read, filed by name into 资料/."""
+        if not isinstance(name,str) or not name or Path(name).name!=name or name in ('.','..'):
+            raise Error('INVALID_ARGUMENT','Single filename required')
+        if name.startswith(('.','~$')):raise Error('INVALID_ARGUMENT','Hidden or temporary names are never indexed; rename the attachment')
+        if not isinstance(content,bytes):raise Error('INVALID_ARGUMENT','Source content must be bytes')
+        j=Jobs(self.w).get(jid)
+        if project_id not in j['scope']['project_ids']:raise Error('INVALID_SCOPE','Project outside job')
+        relative=self.w.project_for(project_id)['path']+'/资料/'+name
+        incoming=hashlib.sha256(content).hexdigest()
+        target=self.w.path(relative)
+        if target.is_file() and digest(target)==incoming:
+            return {'path':relative,'hash':incoming,'purpose':'source','status':'approved','replayed':True}
+        detail={'source_ref':source_ref} if source_ref is not None else None
+        saved=Artifacts(self.w).save(jid,relative,content,expected_hash=expected_hash,confirm=confirm,purpose='source',lease_token=lease_token,detail=detail)
+        return {**saved,'replayed':False}
     def _directory(self,jid,project_id):
         directory=next((d for d in self.directories(jid) if d['project_id']==project_id),None)
         if not directory:raise Error('INVALID_SCOPE','Project outside job')
