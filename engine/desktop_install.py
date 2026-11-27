@@ -24,8 +24,8 @@ ROUTINE = (
     'prepare_work_context', 'open_work', 'search_sources', 'read_source', 'read_project_file',
     'compare_project_file', 'list_project_memory', 'read_project_memory',
     'mark_context_read', 'append_timeline', 'checkpoint_job', 'save_work_checkpoint',
-    'write_work_file', 'save_artifact', 'checkout_draft', 'commit_draft',
-    'request_publication', 'list_decisions', 'list_scenarios', 'read_scenario',
+    'write_work_file', 'save_artifact', 'receive_source', 'checkout_draft', 'commit_draft',
+    'request_publication', 'list_decisions', 'record_sent', 'list_sent', 'read_sent_version', 'list_scenarios', 'read_scenario',
     'apply_scenario',
 )
 
