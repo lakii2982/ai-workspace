@@ -44,8 +44,8 @@
 - create_job: title(str), goal(str), scope(object), acceptance(list[str],可选), agent(str,可选)
 - resume_job: jid(str)
 - checkpoint_job: jid(str), revision(int), patch(object), reopen(bool,默认false)
-- search_sources: query(str), scope(object), limit(int,默认20), strict(bool,默认false)。常规搜索枚举当前范围，未变化的本地文件用设备、文件标识、大小与修改/状态时间复用已有索引。strict=true 或显式 index update 重新校验文件内容。read_source 引用前始终回读原件并核对指纹。旧索引在首次访问时自动补齐派生缓存。
-- read_source: source_id(str), scope(object), expected_hash(str,可选)。复核已保存的引用时传入当时的 sha256，原件换版后返回 STALE_INDEX。
+- search_sources: query(str), scope(object) 或 project_id(str), limit(int,默认20), strict(bool,默认false)。MCP 的 scope 沿用原对象（project_ids、include_company、include_professional，topic_ids 可省略并按 [] 适配）；已由 open_work 选定单项目时可改传 project_id。两种形式必须二选一，缺失则返回可操作的 INVALID_ARGUMENT。CLI 与核心仍使用完整四字段 scope。常规搜索枚举当前范围，未变化的本地文件用设备、文件标识、大小与修改/状态时间复用已有索引。strict=true 或显式 index update 重新校验文件内容。read_source 引用前始终回读原件并核对指纹。旧索引在首次访问时自动补齐派生缓存。
+- read_source: source_id(str), scope(object) 或 project_id(str), expected_hash(str,可选)。MCP 的 scope/project_id 选择与 search_sources 相同；复核已保存的引用时传入当时的 sha256，原件换版后返回 STALE_INDEX。
 - save_artifact: jid(str), relative(str), content(str)或content_base64(str), expected_hash(str|null,默认null表示必须不存在), confirm(bool,默认false), purpose(str,默认draft)
 - receive_source: jid(str), project_id(str), name(str,单个文件名), content(str)或content_base64(str)或copy_id(str)，三者严格互斥；expected_hash(str|null,默认null表示必须不存在), confirm(bool,默认false), lease_token(str,可选), source_ref(str,可选)。聊天附件原件收件：宿主把实际读到的字节按文件名存入项目 资料/，也可仅传 `checkout_draft` 返回的受控副本 ID；后者逐项核验任务、项目、文件名和副本相对路径，绝不读取任意主机路径，且不会创建工作稿。宿主未能读取原始附件链接时必须如实告知用户，不得凭空生成内容。新收原件标记为 original。同一工作同内容重试复用首次登记。替换旧文件需 confirm=true 及旧指纹，历史原文保留。source_ref 记录原始附件出处（如聊天文件标识）写入历史事件。收件后按既有检索链路 search_sources/read_source 回读；原件变化按 STALE_INDEX 回查；范围隔离与 search_sources 相同。
 - recover_artifacts: jid(str), lease_token?(str)。仅从受控保存留下的 committed journal 回填缺失 artifact 清单。当前文件 hash、任务 scope 和记录的 artifact 必须全匹配，绝不覆盖或回滚人工改动；飞书启用时仍须有效租约，远端 pending 仍按 reconcile_remote 处理。

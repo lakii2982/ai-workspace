@@ -20,7 +20,8 @@ def test_real_stdio(tmp_path):
                 await session.initialize()
                 tools=await session.list_tools();assert {'list_jobs','resume_job','save_artifact','receive_source','save_memory_note','list_memory_notes','report_issue'} <= {t.name for t in tools.tools}
                 search_tool=next(tool for tool in tools.tools if tool.name=='search_sources')
-                assert {'project_ids','include_company','include_professional','topic_ids','project_id'} <= set(search_tool.inputSchema['properties'])
+                assert {'scope','project_id'} <= set(search_tool.inputSchema['properties'])
+                assert 'project_ids' not in search_tool.inputSchema['properties']
                 result=await session.call_tool('list_projects',{})
                 assert not result.isError and 'PRJ-0001' in str(result)
                 noted=await session.call_tool('save_memory_note',{'project_id':'PRJ-0001','name':'report-style','description':'用户偏好要点式汇报','type':'user','content':'# 汇报偏好\n\n先给结论。'})
@@ -32,16 +33,21 @@ def test_real_stdio(tmp_path):
                 assert not job.isError and 'JOB-0001' in str(job)
                 result=await session.call_tool('resume_job',{'jid':'JOB-0001'})
                 assert not result.isError and 'Verify' in str(result)
-                # Structured MCP scope defaults topic_ids to []; clients no
-                # longer have to manufacture an otherwise-empty field.
+                # Real host failure: nested scope omitted only topic_ids. The
+                # MCP adapter restores it without altering the other bounds.
                 searched=await session.call_tool('search_sources',{'query':'采购周期',
-                    'project_ids':['PRJ-0001'],'include_company':False,'include_professional':False})
+                    'scope':{'project_ids':['PRJ-0001'],'include_company':False,
+                             'include_professional':False}})
                 assert payload(searched)['ok']
                 sid=payload(searched)['result']['matches'][0]['source_id']
+                scoped_read=await session.call_tool('read_source',{'source_id':sid,
+                    'scope':{'project_ids':['PRJ-0001'],'include_company':False,
+                             'include_professional':False}})
+                assert payload(scoped_read)['ok']
                 readback=await session.call_tool('read_source',{'source_id':sid,'project_id':'PRJ-0001'})
                 assert payload(readback)['ok']
-                # The complete legacy scope remains valid, but never combines
-                # with the selected-project shorthand.
+                # Complete original scope remains valid, as does the selected
+                # project shorthand; they cannot be combined.
                 legacy=await session.call_tool('search_sources',{'query':'采购周期','scope':scope})
                 assert payload(legacy)['ok']
                 conflict=payload(await session.call_tool('search_sources',{
@@ -77,6 +83,8 @@ def test_open_work_stdio(tmp_path):
     w=Workspace(tmp_path);w.init();p=w.project_create('入口')
     (w.path(p['path']+'/资料/报价.md')).write_text('报价资料')
     (w.path(p['path']+'/资料/附件')).mkdir()
+    (w.path(p['path']+'/资料/.DS_Store')).write_text('macOS metadata')
+    (w.path(p['path']+'/资料/~$报价.xlsx')).write_text('Office lock')
     async def run():
         params=StdioServerParameters(command=sys.executable,args=['-m','aiws.mcp_server_entry'],env={**os.environ,'AIWS_WORKSPACE':str(tmp_path)})
         async with stdio_client(params) as (read,write):

@@ -128,7 +128,8 @@ class Entry:
         """A bounded, non-recursive next read after explicit project selection."""
         project=self.w.project_for(project_id)
         folder=self.w.path(project['path']+'/资料')
-        entries=sorted(folder.iterdir(),key=lambda item:item.name.casefold())
+        entries=sorted((item for item in folder.iterdir()
+                        if not item.name.startswith(('.', '~$'))),key=lambda item:item.name.casefold())
         items=[]
         for entry in entries[:SOURCE_PREVIEW_LIMIT]:
             if entry.is_file():

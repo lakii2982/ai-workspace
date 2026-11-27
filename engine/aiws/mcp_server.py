@@ -1,5 +1,6 @@
 import os
 from typing import Literal
+from typing_extensions import NotRequired, TypedDict
 from mcp.server.fastmcp import FastMCP, Context
 from mcp.types import ToolAnnotations
 
@@ -55,45 +56,45 @@ def invoke(operation,args,timeout=None):
         return {'ok':False,'error':{'code':'ENTRY_UNAVAILABLE','message':'Invalid response from the core'}}
 
 
-def source_scope(scope, project_id, project_ids, include_company, include_professional, topic_ids):
-    """Accept legacy complete scope or explicit MCP fields, never both."""
-    explicit = (project_id is not None or project_ids is not None or include_company is not None
-                or include_professional is not None or topic_ids is not None)
-    if scope is not None:
-        if explicit:
-            return None, {'ok':False,'error':{'code':'INVALID_ARGUMENT',
-                'message':'Supply scope or structured project parameters, not both'}}
-        return scope, None
-    if project_id is not None and project_ids is not None:
+class SourceScope(TypedDict):
+    """MCP search scope; topic_ids is optional only for this compatibility edge."""
+    project_ids: list[str]
+    include_company: bool
+    include_professional: bool
+    topic_ids: NotRequired[list[str]]
+
+
+def source_scope(scope, project_id):
+    """Accept exactly one of the original scope object or one selected project."""
+    if scope is not None and project_id is not None:
         return None, {'ok':False,'error':{'code':'INVALID_ARGUMENT',
-            'message':'project_id and project_ids cannot be combined'}}
-    if project_id is not None:
-        if not isinstance(project_id,str) or not project_id.strip():
-            return None, {'ok':False,'error':{'code':'INVALID_ARGUMENT','message':'project_id is required'}}
-        project_ids=[project_id]
-    values=dict(include_company=False if include_company is None else include_company,
-                include_professional=False if include_professional is None else include_professional,
-                project_ids=[] if project_ids is None else project_ids,
-                topic_ids=[] if topic_ids is None else topic_ids)
-    return values, None
+            'message':'Supply scope or project_id, not both'}}
+    if scope is not None:
+        if not isinstance(scope,dict):
+            return None, {'ok':False,'error':{'code':'INVALID_ARGUMENT',
+                'message':'scope must be an object'}}
+        return {**scope, 'topic_ids':scope.get('topic_ids',[])}, None
+    if not isinstance(project_id,str) or not project_id.strip():
+        return None, {'ok':False,'error':{'code':'INVALID_ARGUMENT',
+            'message':'Supply the original scope or one selected project_id'}}
+    return dict(include_company=False,include_professional=False,
+                project_ids=[project_id.strip()],topic_ids=[]), None
 
 @server.tool(annotations=ToolAnnotations(readOnlyHint=True, destructiveHint=False))
 def list_projects(query:str='',limit:int=20,offset:int=0)->dict:
     """Discover stable project identities. Never infer project scope from the working directory."""
     return invoke('list_projects',dict(query=query,limit=limit,offset=offset))
 @server.tool()
-def search_sources(query:str,project_ids:list[str]|None=None,include_company:bool|None=None,
-                   include_professional:bool|None=None,topic_ids:list[str]|None=None,
-                   project_id:str|None=None,scope:dict|None=None,limit:int=20,strict:bool=False)->dict:
-    """Search an explicit scope: project_ids plus optional company/professional switches (topic_ids defaults to []). After open_work selects one project, project_id is the shorter alternative. scope remains the legacy complete four-field form; do not combine forms."""
-    resolved,error=source_scope(scope,project_id,project_ids,include_company,include_professional,topic_ids)
+def search_sources(query:str,scope:SourceScope|None=None,limit:int=20,strict:bool=False,
+                   project_id:str|None=None)->dict:
+    """Search either the original scope object (project_ids and both switches; topic_ids may be omitted) or one selected project_id from open_work. Do not combine them."""
+    resolved,error=source_scope(scope,project_id)
     return error or invoke('search_sources',dict(query=query,scope=resolved,limit=limit,strict=strict))
 @server.tool()
-def read_source(source_id:str,project_ids:list[str]|None=None,include_company:bool|None=None,
-                include_professional:bool|None=None,topic_ids:list[str]|None=None,
-                project_id:str|None=None,scope:dict|None=None,expected_hash:str|None=None)->dict:
-    """Re-read a locator in an explicit scope. Use project_id after open_work selected one project, or project_ids with optional company/professional switches; topic_ids defaults to []. scope is legacy and cannot be combined."""
-    resolved,error=source_scope(scope,project_id,project_ids,include_company,include_professional,topic_ids)
+def read_source(source_id:str,scope:SourceScope|None=None,expected_hash:str|None=None,
+                project_id:str|None=None)->dict:
+    """Re-read a locator using the original scope object (topic_ids may be omitted) or one selected project_id. Do not combine them."""
+    resolved,error=source_scope(scope,project_id)
     return error or invoke('read_source',dict(source_id=source_id,scope=resolved,expected_hash=expected_hash))
 @server.tool()
 def create_job(title:str,goal:str,scope:dict,acceptance:list[str]|None=None,agent:str='agent',request_id:str|None=None)->dict:
