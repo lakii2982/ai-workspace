@@ -82,6 +82,18 @@ def record_task_feedback(jid:str,feedback:str,lease_token:str|None=None)->dict:
     """Keep a one-time user instruction on this task only. Use project memory for enduring conventions."""
     return invoke('record_task_feedback',dict(jid=jid,feedback=feedback,lease_token=lease_token))
 @server.tool()
+def prepare_handoff(jid:str,note:str,requested_agent:str='',independent_review:bool=False)->dict:
+    """Make a portable continuation package. It is not delivered until a bound receiving session accepts it."""
+    return invoke('prepare_handoff',dict(jid=jid,note=note,requested_agent=requested_agent,independent_review=independent_review))
+@server.tool(annotations=ToolAnnotations(readOnlyHint=True, destructiveHint=False))
+def read_handoff(jid:str,handoff_id:str)->dict:
+    """Read a portable handoff package before choosing whether to accept it."""
+    return invoke('read_handoff',dict(jid=jid,handoff_id=handoff_id))
+@server.tool()
+def accept_handoff(jid:str,handoff_id:str,session_id:str)->dict:
+    """Record delivery only when this receiving session is already bound to the same task."""
+    return invoke('accept_handoff',dict(jid=jid,handoff_id=handoff_id,session_id=session_id))
+@server.tool()
 def save_artifact(jid:str,relative:str,content:str|None=None,content_base64:str|None=None,expected_hash:str|None=None,confirm:bool=False,purpose:str='draft',lease_token:str|None=None)->dict:
     """Save text/binary with expected SHA256. confirm=true only after actual user authorization to publish formal knowledge."""
     return invoke('save_artifact',dict(jid=jid,relative=relative,content=content,content_base64=content_base64,expected_hash=expected_hash,confirm=confirm,purpose=purpose,lease_token=lease_token))

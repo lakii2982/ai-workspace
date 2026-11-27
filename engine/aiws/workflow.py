@@ -1,5 +1,6 @@
 """Task ownership, deterministic resolution and durable session bindings."""
 import hashlib
+import re
 import time
 import uuid
 from .core import Error, now, put_json, load
@@ -67,6 +68,45 @@ class Workflow:
         if missing_ok and not path.exists():
             return None
         return load(path)['jid']
+
+    def prepare_handoff(self, jid, note, requested_agent='', independent_review=False):
+        if not isinstance(note, str) or not note.strip() or not isinstance(requested_agent, str) or type(independent_review) is not bool:
+            raise Error('INVALID_ARGUMENT', 'Handoff note and options are invalid')
+        job = self.jobs.get(jid)
+        handoff_id = uuid.uuid4().hex
+        record = dict(schema_version=1, handoff_id=handoff_id, jid=jid, note=note.strip(),
+                      requested_agent=requested_agent.strip() or None,
+                      independent_review=independent_review, created_at=now(), status='prepared',
+                      task=self.jobs.brief_record(job),
+                      resume=dict(operation='resume_job', jid=jid))
+        path = self.w.path(f'.workspace/handoffs/{jid}/{handoff_id}.json')
+        put_json(path, record)
+        return {**record, 'delivery':dict(status='not_delivered',
+                reason='No receiving session has accepted this handoff',
+                fallback='continue_with_current_agent' if not independent_review else 'wait_for_independent_reviewer')}
+
+    def read_handoff(self, jid, handoff_id):
+        path = self.w.path(f'.workspace/handoffs/{jid}/{self._handoff_id(handoff_id)}.json')
+        return load(path)
+
+    def accept_handoff(self, jid, handoff_id, session_id):
+        if not isinstance(session_id, str) or not session_id:
+            raise Error('INVALID_ARGUMENT', 'Receiving session ID required')
+        if self.session_job_id(session_id, missing_ok=True) != jid:
+            raise Error('INVALID_STATE', 'Receiving session is not bound to this task')
+        path = self.w.path(f'.workspace/handoffs/{jid}/{self._handoff_id(handoff_id)}.json')
+        record = load(path)
+        if record['status'] == 'received':
+            return record
+        record.update(status='received', received_at=now(), receiving_session=session_id)
+        put_json(path, record)
+        return record
+
+    @staticmethod
+    def _handoff_id(handoff_id):
+        if not isinstance(handoff_id, str) or not re.fullmatch(r'[0-9a-f]{32}', handoff_id):
+            raise Error('INVALID_ARGUMENT', 'Invalid handoff ID')
+        return handoff_id
 
 def check_lease(j,token,require=False):
     lease=j.get('lease',{})

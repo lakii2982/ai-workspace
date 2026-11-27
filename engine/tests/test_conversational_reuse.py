@@ -29,3 +29,18 @@ def test_project_conventions_task_feedback_and_cross_project_reuse(tmp_path):
         instructions='按产品和维保分项。', reason='用户认可的做法'))
     applied=service.call('apply_scenario', dict(jid=target_job['job_id'], scenario_id=scenario['scenario_id']))
     assert applied['version'] == 1
+
+
+def test_handoff_is_not_delivered_until_a_bound_session_accepts(tmp_path):
+    service=Service(tmp_path);service.call('init', {})
+    project=service.call('create_project', {'name':'交接'})
+    job=service.call('create_job', dict(title='复核报价', goal='独立复核', scope=scope(project['project_id'])))
+    handoff=service.call('prepare_handoff', dict(jid=job['job_id'], note='核对总价和交期',
+        requested_agent='reviewer', independent_review=True))
+    assert handoff['delivery']['status'] == 'not_delivered'
+    assert handoff['delivery']['fallback'] == 'wait_for_independent_reviewer'
+    with pytest.raises(Error, match='not bound'):
+        service.call('accept_handoff', dict(jid=job['job_id'], handoff_id=handoff['handoff_id'], session_id='other'))
+    service.call('bind_session', dict(jid=job['job_id'], session_id='review-session'))
+    accepted=service.call('accept_handoff', dict(jid=job['job_id'], handoff_id=handoff['handoff_id'], session_id='review-session'))
+    assert accepted['status'] == 'received' and accepted['receiving_session'] == 'review-session'
